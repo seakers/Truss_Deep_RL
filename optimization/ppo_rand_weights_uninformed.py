@@ -53,6 +53,7 @@ def run_ppo_rand_weights_uninformed(max_values, params):
         all_avg_obj.append(stats['avg_obj'])
         all_kl.append(stats['kl'])
 
+    all_des = np.array(all_des)
     all_obj = np.array(all_obj)
     all_constraints = np.array(all_constraints)
     all_constraint_vals = np.array(all_constraint_vals)
@@ -72,15 +73,14 @@ def run_ppo_rand_weights_uninformed(max_values, params):
     hypervolumes = []
 
     for obj in range(NFE):
-        if all_constraints[obj] == False or len(hypervolumes) == 0: 
+        if all_constraints[obj] == False or len(hypervolumes) == 0: # check this to save computational time
             pfront_obj = hv_obj[:obj+1]
             pfront_des = all_des[:obj+1]
             pfront_mask = is_pareto_efficient(pfront_obj, return_mask=True)
-            pfront_obj = pfront_obj[pfront_mask]
             if pfront_mask[-1]:
-                pareto_front_obj.append(all_obj[:obj+1][pfront_mask])
-                pareto_front_des.append([pfront_des[i] for i in range(len(pfront_des)) if pfront_mask[i]])
-                hypervolumes.append(hv_ind(pfront_obj))
+                pareto_front_obj.append(pfront_obj[pfront_mask])
+                pareto_front_des.append(pfront_des[pfront_mask])
+                hypervolumes.append(hv_ind(pfront_obj[pfront_mask]))
             else:
                 hypervolumes.append(hypervolumes[-1])
                 pareto_front_obj.append(pareto_front_obj[-1])

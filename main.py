@@ -12,8 +12,11 @@ import pickle
 # Keep these imports; we will adapt the files they point to later
 from optimization.random_search import run_random_search
 from optimization.genetic_algorithm import run_genetic_algorithm
-from optimization.ppo_rand_weights_uninformed import run_ppo_rand_weights_uninformed
+# from optimization.ppo_rand_weights_uninformed import run_ppo_rand_weights_uninformed
 from optimization.ppo_rand_weights_state import run_ppo_rand_weights_state
+from optimization.warm_start_ga import run_warm_start_ga
+from optimization.design_repair import run_design_repair_ppo
+from optimization.intelligent_mutation_ga import run_intelligent_mutation_ga
 
 # Updated imports for Truss context
 # (We will define these in the future 'utils/problem.py' and 'utils/visualization.py')
@@ -34,8 +37,11 @@ def initialize_methods():
     methods = [
         OptimizationMethod("Random Search", run_random_search, "blue", False),
         OptimizationMethod("Genetic Algorithm", run_genetic_algorithm, "orange", True),
-        OptimizationMethod("PPO Random Weights Uninformed", run_ppo_rand_weights_uninformed, "green", True),
-        OptimizationMethod("PPO Random Weights State", run_ppo_rand_weights_state, "red", True),
+        # OptimizationMethod("PPO Random Weights Uninformed", run_ppo_rand_weights_uninformed, "green", True),
+        # OptimizationMethod("PPO Random Weights State", run_ppo_rand_weights_state, "red", True),
+        # OptimizationMethod("Warm Start GA", run_warm_start_ga, "green", True),
+        OptimizationMethod("Design Repair PPO", run_design_repair_ppo, "purple", True),
+        OptimizationMethod("Intelligent Mutation GA", run_intelligent_mutation_ga, "cyan", True)
     ]
     return methods
 
@@ -83,11 +89,11 @@ def store_results(storage, method_name, results):
     storage[method_key]['all_runs_NFE'].append(NFE)
 
 
-def truncate_genetic_algorithm(storage, methods):
-    """Truncate the GA because runs can be of different lengths if early stopping or skipping occurs"""
+def truncate_data(storage, methods):
+    """Truncate the methods which can have different lengths for various reasons"""
     min_nfe = None
     for method in methods:
-        if method.name == "Genetic Algorithm":
+        if method.name == "Genetic Algorithm" or method.name == "Warm Start GA" or method.name == "Design Repair PPO" or method.name == "Intelligent Mutation GA": # these three can have variable nfe
             key = method.name.replace(" ", "_").lower()
             if key not in storage or not storage[key]['all_runs_NFE']:
                 continue
@@ -95,16 +101,15 @@ def truncate_genetic_algorithm(storage, methods):
             nfe = storage[key]['all_runs_NFE']
             min_nfe = min(nfe)
 
-            data = storage[key]
             # Truncate lists to the minimum length found
-            data['all_runs_des'] = [des[:min_nfe] for des in data['all_runs_des']]
-            data['all_runs_obj'] = [obj[:min_nfe] for obj in data['all_runs_obj']]
-            data['all_runs_pareto_front_des'] = [pf[:min_nfe] for pf in data['all_runs_pareto_front_des']]
-            data['all_runs_pareto_front_obj'] = [pf[:min_nfe] for pf in data['all_runs_pareto_front_obj']]
-            data['all_runs_hypervolumes'] = [hv[:min_nfe] for hv in data['all_runs_hypervolumes']]
-            data['all_runs_NFE'] = [min_nfe for _ in data['all_runs_NFE']]
+            storage[key]['all_runs_des'] = [des[:min_nfe] for des in storage[key]['all_runs_des']]
+            storage[key]['all_runs_obj'] = [obj[:min_nfe] for obj in storage[key]['all_runs_obj']]
+            storage[key]['all_runs_pareto_front_des'] = [pf[:min_nfe] for pf in storage[key]['all_runs_pareto_front_des']]
+            storage[key]['all_runs_pareto_front_obj'] = [pf[:min_nfe] for pf in storage[key]['all_runs_pareto_front_obj']]
+            storage[key]['all_runs_hypervolumes'] = [hv[:min_nfe] for hv in storage[key]['all_runs_hypervolumes']]
+            storage[key]['all_runs_NFE'] = [min_nfe for _ in storage[key]['all_runs_NFE']]
 
-    return min_nfe
+    return storage
 
 
 def calculate_statistics(hypervolumes_array):
@@ -257,11 +262,11 @@ def save_all_data(storage, methods, params):
 
 def main():
     # Configuration
-    num_runs = 5
+    num_runs = 1
     
     params = {
-        'num_epochs': 100000,
-        'mini_batch_size': 16,
+        'num_epochs': 50,
+        'mini_batch_size': 64,
         'gamma': 0.999,
         'lambda': 0.9,
         'learning_rate': 0.0003,
@@ -299,8 +304,8 @@ def main():
                 max_values = method_max_values
                 print(f"Max values found (for normalization): {max_values}")
     
-    # Truncate Genetic Algorithm to ensure consistent plotting
-    min_ga_nfe = truncate_genetic_algorithm(storage, methods)
+    # Truncate data to ensure consistent plotting
+    storage = truncate_data(storage, methods)
     
     # Save, Plot, Visualize
     save_all_data(storage, methods, params)

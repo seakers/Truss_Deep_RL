@@ -214,7 +214,7 @@ class TrussProblem:
             
             stress_val = abs(element_stresses[idx])
             color = cmap(norm(stress_val))
-            linewidth = action * 2 
+            linewidth = action * 0.1 
             ax.plot([coord_1[0], coord_2[0]], [coord_1[1], coord_2[1]], [coord_1[2], coord_2[2]], 
                     color=color, linewidth=linewidth, alpha=0.9)
             

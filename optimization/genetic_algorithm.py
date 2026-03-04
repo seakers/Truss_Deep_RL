@@ -1,3 +1,4 @@
+import time
 import numpy as np
 import pygad
 import matplotlib.pyplot as plt
@@ -75,6 +76,7 @@ def run_genetic_algorithm(max_values, params):
     ga_instance.run()
 
     # Post-Processing
+    all_des = np.array(all_des)
     all_obj = np.array(all_obj)
     all_constraints = np.array(all_constraints)
     all_constraint_vals = np.array(all_constraint_vals)
@@ -93,16 +95,25 @@ def run_genetic_algorithm(max_values, params):
     pareto_front_obj = []
     hypervolumes = []
 
+    pareto_time = 0
+    hv_time = 0
+
+    total_time_start = time.time()
     for obj in range(NFE):
         if all_constraints[obj] == False or len(hypervolumes) == 0: # check this to save computational time
             pfront_obj = hv_obj[:obj+1]
             pfront_des = all_des[:obj+1]
+            p_start_time = time.time()
             pfront_mask = is_pareto_efficient(pfront_obj, return_mask=True)
-            pfront_obj = pfront_obj[pfront_mask]
+            p_end_time = time.time()
+            pareto_time += (p_end_time - p_start_time)
             if pfront_mask[-1]:
-                pareto_front_obj.append(all_obj[:obj+1][pfront_mask])
-                pareto_front_des.append([pfront_des[i] for i in range(len(pfront_des)) if pfront_mask[i]])
-                hypervolumes.append(hv_ind(pfront_obj))
+                pareto_front_obj.append(pfront_obj[pfront_mask])
+                pareto_front_des.append(pfront_des[pfront_mask])
+                hv_start_time = time.time()
+                hypervolumes.append(hv_ind(pfront_obj[pfront_mask]))
+                hv_end_time = time.time()
+                hv_time += (hv_end_time - hv_start_time)
             else:
                 hypervolumes.append(hypervolumes[-1])
                 pareto_front_obj.append(pareto_front_obj[-1])
@@ -111,5 +122,10 @@ def run_genetic_algorithm(max_values, params):
             hypervolumes.append(hypervolumes[-1])
             pareto_front_obj.append(pareto_front_obj[-1])
             pareto_front_des.append(pareto_front_des[-1])
+    total_time_end = time.time()
+    print(f"Total time for Pareto front updates and hypervolume calculations: {total_time_end - total_time_start:.4f} seconds")
+
+    print(f"Time for Pareto front updates: {pareto_time:.4f} seconds")
+    print(f"Time for hypervolume calculations: {hv_time:.4f} seconds")
 
     return all_des, all_obj, pareto_front_des, pareto_front_obj, hypervolumes, NFE
