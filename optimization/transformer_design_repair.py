@@ -22,6 +22,59 @@ class PositionalEncoding(nn.Module):
     def forward(self, x):
         x = x + self.pe[:x.size(0), :]
         return self.dropout(x)
+    
+    
+class CustomDecoderLayer(nn.Module):
+
+    def __init__(self, d_model, dim_feedforward=64, dropout=0.1):
+
+        super(CustomDecoderLayer, self).__init__()
+
+        self.linear1 = nn.Linear(d_model, dim_feedforward)
+        self.dropout = nn.Dropout(dropout)
+        self.linear2 = nn.Linear(dim_feedforward, d_model)
+
+        self.norm1 = nn.LayerNorm(d_model)
+        self.norm2 = nn.LayerNorm(d_model)
+        self.norm3 = nn.LayerNorm(d_model)
+
+        self.dropout1 = nn.Dropout(dropout)
+        self.dropout2 = nn.Dropout(dropout)
+        self.dropout3 = nn.Dropout(dropout)
+
+
+    def forward(self, tgt, tgt_mask=None):
+
+        tgt2 = F.scaled_dot_product_attention(tgt, tgt, tgt, tgt_mask)
+        tgt = tgt + self.dropout1(tgt2)
+        tgt = self.norm1(tgt)
+
+        tgt2 = self.linear2(self.dropout(F.relu(self.linear1(tgt))))
+        tgt = tgt + self.dropout3(tgt2)
+        tgt = self.norm3(tgt)
+
+        return tgt
+
+
+class CustomTransformerDecoder(nn.Module):
+
+    def __init__(self, d_model, num_layers, dim_feedforward=64, dropout=0.1):
+
+        super(CustomTransformerDecoder, self).__init__()
+        self.layers = nn.ModuleList([
+            CustomDecoderLayer(d_model, dim_feedforward, dropout) 
+            for _ in range(num_layers)
+        ])
+        self.num_layers = num_layers
+
+
+    def forward(self, tgt, tgt_mask=None):
+
+        output = tgt
+        for layer in self.layers:
+            output = layer(output, tgt_mask)
+
+        return output
 
 
 class Actor(nn.Module):
@@ -142,30 +195,28 @@ class Actor(nn.Module):
     def sample_action(self, design_state):
         """
         Sample variable to change, new value, and stop decision
-        Returns: (var_log_prob, var_idx, value_log_prob, value_idx, stop_log_prob, stop_decision)
         """
-        pointer_logits, encoded, stop_logits = self.forward(design_state.unsqueeze(0))
-        
-        # Sample variable to modify
-        pointer_probs = F.softmax(pointer_logits, dim=-1)
-        var_dist = torch.distributions.Categorical(probs=pointer_probs)
-        var_indices = var_dist.sample()  # [batch]
-        var_log_probs = var_dist.log_prob(var_indices)  # [batch]
-        
+        if design_state.dim() == 1:
+            design_state = design_state.unsqueeze(0)  # [1, vars+objs]
+        pointer_logits, encoded, stop_logits = self.forward(design_state)
+
+        # Sample variable to modify - use logits directly (cast to fp32)
+        var_dist = torch.distributions.Categorical(logits=pointer_logits.float())
+        var_indices = var_dist.sample()
+        var_log_probs = var_dist.log_prob(var_indices)
+
         # Sample new value for selected variable
         value_logits = self.get_value_logits(encoded, var_indices)
-        value_probs = F.softmax(value_logits, dim=-1)
-        value_dist = torch.distributions.Categorical(probs=value_probs)
-        value_indices = value_dist.sample()  # [batch]
-        value_log_probs = value_dist.log_prob(value_indices)  # [batch]
-        
+        value_dist = torch.distributions.Categorical(logits=value_logits.float())
+        value_indices = value_dist.sample()
+        value_log_probs = value_dist.log_prob(value_indices)
+
         # Sample stop decision
-        stop_probs = F.softmax(stop_logits, dim=-1)
-        stop_dist = torch.distributions.Categorical(probs=stop_probs)
-        stop_decisions = stop_dist.sample()  # [batch], 0=continue, 1=stop
-        stop_log_probs = stop_dist.log_prob(stop_decisions)  # [batch]
-        
-        return (var_log_probs, var_indices, 
+        stop_dist = torch.distributions.Categorical(logits=stop_logits.float())
+        stop_decisions = stop_dist.sample()
+        stop_log_probs = stop_dist.log_prob(stop_decisions)
+
+        return (var_log_probs, var_indices,
                 value_log_probs, value_indices,
                 stop_log_probs, stop_decisions)
     
@@ -178,6 +229,7 @@ class Actor(nn.Module):
         
         with autocast(device_type=self.device.type, dtype=torch.float16):
             policy_losses = []
+            all_kls = []
             for idx in range(len(observations)):
                 observation = observations[idx]
                 action = actions[idx]
@@ -212,6 +264,7 @@ class Actor(nn.Module):
                 )
                 policy_loss = torch.min(ratio * advantage, min_advantage)
                 policy_losses.append(-policy_loss)
+                all_kls.append(torch.mean(new_log_probs - old_log_probs))
 
             # Concatenate all losses and average across all timesteps
             policy_loss = torch.cat(policy_losses).mean()
@@ -221,72 +274,107 @@ class Actor(nn.Module):
         self.scaler.update()
         self.scheduler.step()
         
-        kl = torch.mean(new_log_probs - old_log_probs)
+        kl = torch.abs(torch.stack(all_kls).mean())
         
         return policy_loss.item(), kl.item()
 
 
 class Critic(nn.Module):
     """
-    Value network: estimates expected return from current design state
+    Transformer-based value network for design repair.
+    Outputs a scalar value estimate (single-objective, no weights needed).
+    Simpler than [3][6] since design_repair.py uses scalar returns directly.
     """
-    
+
     def __init__(self, device, params, num_objectives, input_dim):
         super(Critic, self).__init__()
         self.device = device
         self.params = params
         self.num_objectives = num_objectives
         self.input_dim = input_dim
-        
-        self.dense_dim = params.get('dense_dim', 64)
+
+        self.dense_dim = 16
         self.scaler = GradScaler('cuda' if torch.cuda.is_available() else 'cpu')
-        
-        
-        self.network = nn.Sequential(
-            nn.Linear(input_dim, self.dense_dim),
-            nn.ReLU(),
-            nn.Linear(self.dense_dim, self.dense_dim),
-            nn.ReLU(),
-            nn.Linear(self.dense_dim, 1)
+
+        # Transformer components - mirrors Actor structure in this file [5]
+        self.encoder = nn.Linear(1, self.dense_dim)
+        self.positional_encoding = PositionalEncoding(self.dense_dim)
+        self.transformer_decoder = CustomTransformerDecoder(
+            d_model=self.dense_dim,
+            num_layers=1,
+            dim_feedforward=self.dense_dim,
+            dropout=0.1
         )
-        
+        # Scalar output - matches existing ppo_update signature (no weights) [5]
+        self.output_layer = nn.Linear(self.dense_dim, 1)
+
         self.optimizer = torch.optim.Adam(self.parameters(), lr=params['learning_rate'])
         self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=1000, gamma=0.9)
-    
-    
+
+
+    def generate_square_subsequent_mask(self, sz):
+
+        mask = torch.triu(torch.ones(sz, sz), diagonal=1)
+        mask = mask.masked_fill(mask == 1, float('-inf'))
+
+        return mask
+
+
     def forward(self, design_state):
         """
-        design_state: [batch, num_variables + num_objectives]
-        Returns: value estimate [batch, 1]
+        design_state: [batch, input_dim]
+        Returns: scalar value estimate [batch]
         """
         with autocast(device_type=self.device.type, dtype=torch.float16):
-            value = self.network(design_state)
-        return value.squeeze(-1)
-    
-    
+            x = design_state.unsqueeze(-1)               # [batch, input_dim, 1]
+            x = self.encoder(x)                           # [batch, input_dim, dense_dim]
+            x = self.positional_encoding(x)               # [batch, input_dim, dense_dim]
+            mask = self.generate_square_subsequent_mask(x.size(1)).to(self.device)
+            x = self.transformer_decoder(x, tgt_mask=mask)  # [batch, input_dim, dense_dim]
+            x = self.output_layer(x)                      # [batch, input_dim, 1]
+            x = x[:, -1, :].squeeze(-1)                  # [batch] - last token, scalar
+
+        return x
+
+
     def sample_critic(self, design_states):
         """Evaluate value for batch of design states"""
         if not isinstance(design_states, torch.Tensor):
             design_states = torch.tensor(design_states, dtype=torch.float32, device=self.device)
+        if design_states.device != self.device:
+            design_states = design_states.to(self.device)
+        # Handle extra batch dimensions safely (avoids the squeeze(1) bug from [3])
+        if design_states.dim() == 3 and design_states.size(0) == 1:
+            design_states = design_states.squeeze(0)
+        elif design_states.dim() == 1:
+            design_states = design_states.unsqueeze(0)
         return self.forward(design_states)
-    
-    
+
+
     def ppo_update(self, design_states, returns):
-        """Update critic with PPO"""
+        """
+        Update critic with PPO - signature unchanged from existing [5].
+        No weights tensor needed since this problem uses scalar returns.
+        """
         self.optimizer.zero_grad()
         value_losses = []
-        
+
         with autocast(device_type=self.device.type, dtype=torch.float16):
             for idx in range(len(design_states)):
-                predicted_values = self.forward(design_states[idx])
-                value_loss = (predicted_values - returns[idx]) ** 2
+                if design_states[idx].size(0) == 0:
+                    continue
+                predicted_values = self.forward(design_states[idx])  # [timesteps]
+                value_loss = (predicted_values - returns[idx]) ** 2   # [timesteps]
                 value_losses.append(value_loss)
 
+            if len(value_losses) == 0:
+                return 0.0
+
             value_loss = torch.cat(value_losses).mean()
-        
+
         self.scaler.scale(value_loss).backward()
         self.scaler.step(self.optimizer)
         self.scaler.update()
         self.scheduler.step()
-        
+
         return value_loss.item()

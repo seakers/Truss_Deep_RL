@@ -67,10 +67,12 @@ def run_genetic_algorithm(max_values, params):
         num_genes=num_genes,
         gene_space=gene_space,
         parent_selection_type="sss",
-        keep_parents=1,
         crossover_type="single_point",
         mutation_type="random",
-        mutation_percent_genes=10
+        mutation_percent_genes=10,
+        keep_elitism=0,
+        keep_parents=0,
+        save_solutions=False,
     )
 
     ga_instance.run()

@@ -8,12 +8,13 @@ import matplotlib.cm as cm
 import matplotlib.colors as colors
 
 class TrussProblem:
-    def __init__(self):
+    def __init__(self, load_factor=1.0):
         """
         Discrete 72-Bar Truss Benchmark
         Action Space: 72 discrete integers [0, 1, 2, 3]
         """
         self.n_elements = 72
+        self.load_factor = load_factor
         self.n_nodes = 20
         
         # --- Discrete Options (Area in in^2) ---
@@ -61,7 +62,7 @@ class TrussProblem:
 
     def _generate_loads(self):
         forces = np.zeros(self.n_nodes * 3)
-        forces[16 * 3 + 2] = -5000.0
+        forces[16 * 3 + 2] = -5000.0 * self.load_factor
         return forces
 
     def solve(self, discrete_actions):

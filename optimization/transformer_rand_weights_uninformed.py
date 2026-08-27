@@ -180,7 +180,7 @@ class Actor(nn.Module):
         self.scaler.update()
         self.scheduler.step()
 
-        kl = torch.mean(new_log_probs - logprob)
+        kl = torch.abs(torch.mean(new_log_probs - logprob))
 
         return policy_loss.item(), kl.item()
     

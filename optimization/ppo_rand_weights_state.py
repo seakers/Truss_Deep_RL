@@ -9,7 +9,7 @@ from optimization.transformer_rand_weights_state import Actor, Critic
 from evaluation.truss_problem import TrussProblem
 from utils.hypervolume_utils import is_pareto_efficient
 
-def run_ppo_rand_weights_state(max_values, params):
+def run_ppo_rand_weights_state(max_values, params, run_idx=0, best_hv_so_far=-np.inf):
     """
     Run PPO with updated reward handling for 3 Objectives + 2 Constraint Values.
     """
@@ -90,18 +90,27 @@ def run_ppo_rand_weights_state(max_values, params):
             pareto_front_obj.append(pareto_front_obj[-1])
             pareto_front_des.append(pareto_front_des[-1])
 
-    torch.save(actor.state_dict(), f'results/{date_str}/actor_model.pth')
-    torch.save(critic.state_dict(), f'results/{date_str}/critic_model.pth')
+    # ── Best-HV model saving ──────────────────────────────────────────────────
+    run_best_hv = hypervolumes[-1] if hypervolumes else 0.0
+
+    # Always save the latest model (overwrites previous run's file)
+    torch.save(actor.state_dict(),
+            f'results/{date_str}/actor_model.pth')
+    torch.save(critic.state_dict(),
+            f'results/{date_str}/critic_model.pth')
+
+    print(f"  [RL Informed Env] Run HV = {run_best_hv:.6f} | "
+        f"Best so far = {best_hv_so_far:.6f}")
 
     # Simple plot
     plt.figure(figsize=(15, 5))
-    plt.subplot(1, 3, 1); plt.plot(all_actor_loss); plt.title('Actor Loss')
-    plt.subplot(1, 3, 2); plt.plot(all_critic_loss); plt.title('Critic Loss')
-    plt.subplot(1, 3, 3); plt.plot(all_kl); plt.title('KL Divergence')
+    plt.subplot(1, 3, 1); plt.plot(all_actor_loss, label='Actor Loss', color='blue'); plt.title('Actor Loss')
+    plt.subplot(1, 3, 2); plt.plot(all_critic_loss, label='Critic Loss', color='orange'); plt.title('Critic Loss')
+    plt.subplot(1, 3, 3); plt.plot(all_kl, label='KL Divergence', color='green'); plt.title('KL Divergence')
     plt.tight_layout()
-    plt.savefig(f'results/{date_str}/ppo_training_results.png')
+    plt.savefig(f'results/{date_str}/ppo_training_results_run_{run_idx}.png')
 
-    return all_des, all_obj, pareto_front_des, pareto_front_obj, hypervolumes, NFE
+    return all_des, all_obj, pareto_front_des, pareto_front_obj, hypervolumes, NFE, run_best_hv
 
 
 def get_models(device, params, num_total_objs):
@@ -135,9 +144,14 @@ def discounted_cumulative_sums(x, discount):
     return scipy.signal.lfilter([1], [1, float(-discount)], x[::-1], axis=0)[::-1]
 
 
-def run_epoch(actor, critic, NFE, max_values, min_mask, device, params):
+def run_epoch(actor, critic, NFE, max_values, min_mask, device, params, eval_function_override=None):
     mini_batch_size = params['mini_batch_size']
-    eval_function = TrussProblem()
+
+    # Use override if provided, otherwise create default
+    if eval_function_override is not None:
+        eval_function = eval_function_override
+    else:
+        eval_function = TrussProblem()
     
     # Total output dimensions (Objectives + Constraints)
     num_total_objs = len(max_values) 

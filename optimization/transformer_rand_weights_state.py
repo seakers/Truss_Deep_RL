@@ -173,18 +173,17 @@ class Actor(nn.Module):
                 (1 + self.clip_ratio) * advantage,
                 (1 - self.clip_ratio) * advantage
             )
-            policy_loss = -torch.mean(torch.min(ratio * torch.t(advantage), min_advantage))
+            policy_loss = -torch.mean(torch.min(ratio * advantage, min_advantage))
 
         self.scaler.scale(policy_loss).backward()
         self.scaler.step(self.optimizer)
         self.scaler.update()
         self.scheduler.step()
 
-        kl = torch.mean(new_log_probs - logprob)
+        kl = torch.abs(torch.mean(new_log_probs - logprob))
 
         return policy_loss.item(), kl.item()
     
-
 
 class Critic(nn.Module):
 
@@ -200,23 +199,42 @@ class Critic(nn.Module):
         self.num_objectives = num_objectives
         self.input_dim = input_dim
 
-        self.input_layer = nn.Linear(self.input_dim, self.dense_dim)
-        self.hidden_layer = nn.Linear(self.dense_dim, self.dense_dim)
+        # Replace MLP layers with transformer components - mirrors [3]
+        self.encoder = nn.Linear(1, self.dense_dim)
+        self.positional_encoding = PositionalEncoding(self.dense_dim)
+        self.transformer_decoder = CustomTransformerDecoder(
+            d_model=self.dense_dim,
+            num_layers=1,
+            dim_feedforward=self.dense_dim,
+            dropout=0.1
+        )
         self.output_layer = nn.Linear(self.dense_dim, self.num_objectives)
 
         self.optimizer = torch.optim.Adam(self.parameters(), lr=params['learning_rate'])
         self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=1000, gamma=0.9)
-    
+
+
+    def generate_square_subsequent_mask(self, sz):
+
+        mask = torch.triu(torch.ones(sz, sz), diagonal=1)
+        mask = mask.masked_fill(mask == 1, float('-inf'))
+
+        return mask
+
 
     def forward(self, x):
 
         with autocast(device_type=self.device.type, dtype=torch.float16):
-            x = self.input_layer(x)
-            x = self.hidden_layer(x)
-            x = self.output_layer(x)
+            x = x.unsqueeze(-1)                     # [batch, seq_len, 1]
+            x = self.encoder(x)                      # [batch, seq_len, dense_dim]
+            x = self.positional_encoding(x)          # [batch, seq_len, dense_dim]
+            mask = self.generate_square_subsequent_mask(x.size(1)).to(self.device)
+            x = self.transformer_decoder(x, tgt_mask=mask)  # [batch, seq_len, dense_dim]
+            x = self.output_layer(x)                 # [batch, seq_len, num_objectives]
+            x = x[:, -1, :]                          # [batch, num_objectives] - last token
 
         return x
-    
+
 
     def sample_critic(self, observation):
 
@@ -224,21 +242,22 @@ class Critic(nn.Module):
         for obs in observation:
             input_obs = []
             input_obs.extend(obs)
-            while(len(input_obs)) < self.input_dim:
+            while len(input_obs) < self.input_dim:
                 input_obs.extend([0])
-            input_observations.append(input_obs)
+            input_observations.append(input_obs[:self.input_dim])  # Also clip if too long
         input_observations = torch.tensor(input_observations, dtype=torch.float32, device=self.device)
-        output = self(input_observations)  # shape: (num components, 5)
+        output = self(input_observations)
 
         return output
-    
+
 
     def ppo_update(self, observation, return_tensor, weights_tensor):
+        # Signature unchanged from [3] - fully compatible with ppo_optimization_informed_state.py [2]
 
         self.optimizer.zero_grad()
         with autocast(device_type=self.device.type, dtype=torch.float16):
-            new_pred_values = self(observation)
-            new_pred_reward = torch.sum(-new_pred_values * weights_tensor, dim=-1)
+            new_pred_values = self(observation)                                    # [batch, num_objectives]
+            new_pred_reward = torch.sum(-new_pred_values * weights_tensor, dim=-1) # [batch]
 
             value_loss = torch.mean((new_pred_reward - return_tensor) ** 2)
 

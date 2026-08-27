@@ -73,7 +73,10 @@ def run_warm_start_ga(max_values, params):
         parent_selection_type="nsga2",
         mutation_type="random",
         mutation_probability=0.1,
-        initial_population=init_designs
+        initial_population=init_designs,
+        keep_elitism=0,
+        keep_parents=0,
+        save_solutions=False,
     )
 
     ga_instance.run()

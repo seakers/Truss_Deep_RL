@@ -99,9 +99,11 @@ def run_intelligent_mutation_ga(max_values, params):
         num_genes=num_genes,
         gene_space=gene_space,
         parent_selection_type="sss",
-        keep_parents=1,
         crossover_type="single_point",
-        mutation_type=intelligent_mutation
+        mutation_type=intelligent_mutation,
+        keep_elitism=0,
+        keep_parents=0,
+        save_solutions=False,
     )
 
     ga_instance.run()
