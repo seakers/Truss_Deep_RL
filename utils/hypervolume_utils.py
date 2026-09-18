@@ -26,6 +26,56 @@ def is_pareto_efficient(costs, return_mask = True):
         return is_efficient
     
 
+def track_pareto_progress(hv_obj, all_des, all_constraints, hv_ind):
+    """
+    Pareto front and hypervolume after every evaluation.
+
+    Tests each new point against the current front rather than replaying the whole
+    history, which makes this linear instead of quadratic. Entries are shared by
+    reference on steps where the front does not change.
+    """
+    hv_obj = np.asarray(hv_obj)
+    all_des = np.asarray(all_des)
+
+    # A negative coordinate means the design beat max_values on that axis, which makes
+    # pymoo integrate volume outside the unit cube and return scores above 1.0. Clipping
+    # is a workaround; the reference itself needs rebuilding.
+    if (hv_obj < 0).any():
+        hv_obj = np.clip(hv_obj, 0.0, None)
+
+    front_pts = None
+    front_idx = None
+    cur_obj = cur_des = None
+    cur_hv = 0.0
+
+    pareto_front_des, pareto_front_obj, hypervolumes = [], [], []
+
+    for i in range(len(hv_obj)):
+        # Feasible points only; the old guard let an infeasible first design seed the front.
+        if not all_constraints[i]:
+            point = hv_obj[i]
+            if front_pts is None:
+                front_pts, front_idx, changed = point[None, :], np.array([i]), True
+            elif np.any(np.all(front_pts <= point, axis=1)):
+                changed = False
+            else:
+                keep = ~np.all(point <= front_pts, axis=1)
+                front_pts = np.vstack([front_pts[keep], point])
+                front_idx = np.append(front_idx[keep], i)
+                changed = True
+
+            if changed:
+                cur_obj = front_pts
+                cur_des = all_des[front_idx]
+                cur_hv = hv_ind(front_pts)
+
+        pareto_front_obj.append(cur_obj)
+        pareto_front_des.append(cur_des)
+        hypervolumes.append(cur_hv)
+
+    return pareto_front_des, pareto_front_obj, hypervolumes
+
+
 class HypervolumeGrid:
 
     def __init__(self,refPoint):
@@ -127,3 +177,34 @@ class HypervolumeGrid:
 
     def getHV(self):
         return np.sum(self.dominated)/self.numPoints * self.HVMax
+
+
+class RunningParetoArchive:
+    """
+    Incremental Pareto front in normalised minimisation space.
+
+    offer(point) returns (joined, delta_hv): whether the point entered the front and
+    how much hypervolume it added.
+    """
+
+    def __init__(self, hv_ind):
+        self.hv_ind = hv_ind
+        self.pts = None
+        self.hv = 0.0
+
+    def offer(self, point):
+        p = np.asarray(point, dtype=float)
+        if self.pts is None:
+            self.pts = p[None, :]
+            new = float(self.hv_ind(self.pts))
+            delta = new - self.hv
+            self.hv = new
+            return True, delta
+        if np.any(np.all(self.pts <= p, axis=1)):      # dominated by the current front
+            return False, 0.0
+        keep = ~np.all(p <= self.pts, axis=1)          # drop what this point dominates
+        self.pts = np.vstack([self.pts[keep], p])
+        new = float(self.hv_ind(self.pts))
+        delta = new - self.hv
+        self.hv = new
+        return True, delta

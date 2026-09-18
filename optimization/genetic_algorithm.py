@@ -1,4 +1,3 @@
-import time
 import numpy as np
 import pygad
 import matplotlib.pyplot as plt
@@ -6,7 +5,7 @@ from copy import deepcopy
 from pymoo.indicators.hv import HV
 
 from evaluation.truss_problem import TrussProblem
-from utils.hypervolume_utils import is_pareto_efficient
+from utils.hypervolume_utils import track_pareto_progress
 
 def run_genetic_algorithm(max_values, params):
     # print("\n\nRunning Genetic Algorithm...\n\n")
@@ -58,6 +57,14 @@ def run_genetic_algorithm(max_values, params):
             obj_arr[min_mask] = -obj_arr[min_mask]
             return obj_arr
 
+    # Stop on evaluation count, not generation count: elitism carries individuals over
+    # unevaluated, so generations cost different numbers of evaluations across methods.
+    nfe_budget = params.get('nfe_budget')
+
+    def _on_generation(ga):
+        if nfe_budget is not None and NFE >= nfe_budget:
+            return "stop"
+
     # Initialize GA
     ga_instance = pygad.GA(
         num_generations=n_gen,
@@ -66,13 +73,16 @@ def run_genetic_algorithm(max_values, params):
         sol_per_pop=pop_size,
         num_genes=num_genes,
         gene_space=gene_space,
-        parent_selection_type="sss",
+        parent_selection_type=params.get('parent_selection_type', 'tournament'),
+        K_tournament=params.get('K_tournament', 3),
         crossover_type="single_point",
         mutation_type="random",
-        mutation_percent_genes=10,
-        keep_elitism=0,
-        keep_parents=0,
+        # Tuned defaults; these were 10% mutation and no elitism.
+        mutation_num_genes=params.get('mutation_num_genes', 1),
+        keep_elitism=params.get('keep_elitism', 8),
+        keep_parents=0,          # ignored by pygad whenever keep_elitism > 0
         save_solutions=False,
+        on_generation=_on_generation,
     )
 
     ga_instance.run()
@@ -93,41 +103,8 @@ def run_genetic_algorithm(max_values, params):
         if objective_min_max[i].lower() == 'max':
             hv_obj[:,i] = 1 - norm_obj[:,i]
 
-    pareto_front_des = []
-    pareto_front_obj = []
-    hypervolumes = []
+    pareto_front_des, pareto_front_obj, hypervolumes = track_pareto_progress(
+        hv_obj, all_des, all_constraints, hv_ind)
 
-    pareto_time = 0
-    hv_time = 0
-
-    total_time_start = time.time()
-    for obj in range(NFE):
-        if all_constraints[obj] == False or len(hypervolumes) == 0: # check this to save computational time
-            pfront_obj = hv_obj[:obj+1]
-            pfront_des = all_des[:obj+1]
-            p_start_time = time.time()
-            pfront_mask = is_pareto_efficient(pfront_obj, return_mask=True)
-            p_end_time = time.time()
-            pareto_time += (p_end_time - p_start_time)
-            if pfront_mask[-1]:
-                pareto_front_obj.append(pfront_obj[pfront_mask])
-                pareto_front_des.append(pfront_des[pfront_mask])
-                hv_start_time = time.time()
-                hypervolumes.append(hv_ind(pfront_obj[pfront_mask]))
-                hv_end_time = time.time()
-                hv_time += (hv_end_time - hv_start_time)
-            else:
-                hypervolumes.append(hypervolumes[-1])
-                pareto_front_obj.append(pareto_front_obj[-1])
-                pareto_front_des.append(pareto_front_des[-1])
-        else:
-            hypervolumes.append(hypervolumes[-1])
-            pareto_front_obj.append(pareto_front_obj[-1])
-            pareto_front_des.append(pareto_front_des[-1])
-    total_time_end = time.time()
-    print(f"Total time for Pareto front updates and hypervolume calculations: {total_time_end - total_time_start:.4f} seconds")
-
-    print(f"Time for Pareto front updates: {pareto_time:.4f} seconds")
-    print(f"Time for hypervolume calculations: {hv_time:.4f} seconds")
 
     return all_des, all_obj, pareto_front_des, pareto_front_obj, hypervolumes, NFE

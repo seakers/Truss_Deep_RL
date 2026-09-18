@@ -6,7 +6,7 @@ from pymoo.indicators.hv import HV
 from copy import deepcopy
 
 from evaluation.truss_problem import TrussProblem
-from utils.hypervolume_utils import is_pareto_efficient
+from utils.hypervolume_utils import is_pareto_efficient, track_pareto_progress
 from optimization.transformer_design_repair import Actor, Critic
 
 def discounted_cumulative_sums(x, discount):
@@ -108,8 +108,8 @@ def run_design_repair_ppo(max_values, params, run_idx=0, best_hv_so_far=-np.inf)
             hv_obj[:,i] = 1 - norm_obj[:,i]
     
     # Calculate Pareto front and hypervolume over time
-    pareto_front_des, pareto_front_obj, hypervolumes = calculate_pareto_progress(
-        all_des, all_obj, all_constraints, hv_obj, hv_ind, NFE
+    pareto_front_des, pareto_front_obj, hypervolumes = track_pareto_progress(
+        hv_obj, all_des, all_constraints, hv_ind
     )
     
     # ── Best-HV model saving ──────────────────────────────────────────────────
@@ -145,8 +145,12 @@ def get_models(device, params, num_total_objs):
     actor.to(device)
     critic.to(device)
 
-    # Dummy tensors must also match the corrected 77 dims
-    input_dummy = torch.zeros((1, num_actions + num_total_objs), dtype=torch.float32).to(device)
+    # Dummy tensors must also match the corrected 77 dims -- or [1, 72, 2] when the
+    # per-bar utilisation channel is on, since then the token count is the design only.
+    if params.get('use_stress', False):
+        input_dummy = torch.zeros((1, num_actions, 2), dtype=torch.float32).to(device)
+    else:
+        input_dummy = torch.zeros((1, num_actions + num_total_objs), dtype=torch.float32).to(device)
     actor(input_dummy)
     critic(input_dummy)  # Same dummy works for both now
 
@@ -179,51 +183,88 @@ def run_repair_epoch(actor, critic, all_des, all_obj, all_constraints, designs, 
     epoch_constraints = []
     epoch_constraint_vals = []
     
+    use_stress = params.get('use_stress', False)
+    max_edits = params.get('max_edits', 200)
+
     # Run modification steps
     for idx in range(len(designs)):
         stop_token = False
         current_design = designs[idx]
+        # These recompute a solve already paid for when this design was sampled, so they
+        # cost wall-clock but no NFE. Only needed for the channels/rewards that use them.
+        if use_stress or params.get('reward_shape', 'domination') == 'potential':
+            _, _, current_cv, current_util = eval_function.evaluate(
+                current_design, return_utilisation=True)
+        else:
+            current_cv, current_util = None, None
+        current_obj = objs[idx]
+        n_edits = 0
 
-        while not stop_token:
-            current_obj = objs[idx]
-            
-            # Sample actions from actor
+        while not stop_token and n_edits < max_edits:
+            n_edits += 1
+
+            # Sample actions from actor. With use_stress the state is [tokens, 2]:
+            # the design in channel 0 and the per-bar utilisation in channel 1.
+            if use_stress:
+                state = np.stack([np.asarray(current_design, dtype=float),
+                                  np.asarray(current_util, dtype=float)], axis=-1)
+            else:
+                state = np.asarray(current_design, dtype=float)
             var_log_prob, var_idx, value_log_prob, value_idx, stop_log_prob, stop_decision = actor.sample_action(
-                torch.tensor(current_design, dtype=torch.float32).to(device)
+                torch.tensor(state, dtype=torch.float32).to(device)
             )
-            
+
             # Create new design
             new_design = current_design.copy()
             new_design[var_idx.item()] = value_idx.item()
-            
+
             # Evaluate new design
-            new_obj, new_constraints, new_constraint_vals = eval_function.evaluate(new_design)
+            new_obj, new_constraints, new_constraint_vals, new_util = eval_function.evaluate(
+                new_design, return_utilisation=True)
             NFE += 1
 
             all_des.append(new_design)
             all_obj.append(new_obj)
             all_constraints.append(new_constraints)
-            
+
             epoch_des.append(new_design)
             epoch_obj.append(new_obj)
             epoch_constraints.append(new_constraints)
             epoch_constraint_vals.append(new_constraint_vals)
-            
+
             # Calculate reward (dense)
             reward = calculate_step_reward(
-                current_obj, new_obj, 
+                current_obj, new_obj,
                 new_constraints,
-                min_mask, params
+                min_mask, params,
+                parent_cv=current_cv, child_cv=new_constraint_vals,
+                max_objectives=max_objectives
             )
-            
+
             # Store trajectory
             batch_actions[idx].append([var_idx.item(), value_idx.item(), stop_decision.item()])
             batch_logprobs[idx].append([var_log_prob.item(), value_log_prob.item(), stop_log_prob.item()])
             batch_rewards[idx].append(reward)
             batch_designs[idx].append(new_design)
             
-            new_obs = new_design + new_obj + list(new_constraint_vals)
+            # Must match the state sample_action was called on, or ppo_update recomputes
+            # log-probs at states the policy never visited. 'full' keeps the old
+            # mismatched behaviour for comparison.
+            if use_stress:
+                # must match the state the policy acted in, channel for channel
+                new_obs = np.stack([np.asarray(new_design, dtype=float),
+                                    np.asarray(new_util, dtype=float)], axis=-1).tolist()
+            elif params.get('obs_mode', 'design') == 'full':
+                new_obs = new_design + new_obj + list(new_constraint_vals)
+            else:
+                new_obs = list(new_design)
             current_design = new_design
+            current_util = new_util
+            if params.get('reward_shape', 'domination') == 'potential':
+                # shaping must compare CONSECUTIVE states for the telescoping to hold
+                current_obj, current_cv = new_obj, new_constraint_vals
+            # otherwise current_obj stays at the episode's starting design, which is what
+            # the domination reward compares against
             batch_observations[idx].append(new_obs)
                     
             # Check if stop decision was made
@@ -302,14 +343,50 @@ def run_repair_epoch(actor, critic, all_des, all_obj, all_constraints, designs, 
     return epoch_data, stats, all_des, all_obj, all_constraints,NFE
 
 
-def calculate_step_reward(parent_obj, child_obj, is_constrained, min_mask, params):
+def design_potential(obj, constraint_vals, max_objectives, min_mask, lam=1.0):
+    """Phi(design): higher is better, a function of the design's own objectives only.
+
+    Each objective is normalised so 0 is ideal and 1 is the reference, the maximisation
+    objective is flipped, and constraint violation is folded in. Being a function of the
+    state alone is what makes the shaped reward below policy-invariant.
+    """
+    z = np.asarray(obj, dtype=float) / np.asarray(max_objectives, dtype=float)
+    z = np.where(min_mask[:len(z)], z, 1.0 - z)          # flip maximisation axes
+    viol = float(np.sum(np.asarray(constraint_vals, dtype=float)))
+    return -(float(np.mean(np.clip(z, 0.0, None))) + lam * viol)
+
+
+def calculate_step_reward(parent_obj, child_obj, is_constrained, min_mask, params,
+                          parent_cv=None, child_cv=None, max_objectives=None):
     """
     Calculate reward for a single modification step.
-    Phase 1: Simple domination (+1 if child dominates parent)
-    Phase 2: Could switch to hypervolume improvement
+
+    reward_shape='domination' (default) is the original: +1 if the child dominates the
+    parent, -0.5 if dominated, -0.01 for a tie, -1 if infeasible. Every edit has negative
+    expected reward, so this punishes episode length.
+
+    reward_shape='potential' pays the change in design quality instead, which telescopes
+    over an episode so the total does not depend on how many edits it took. This is
+    potential-based shaping (Ng, Harada & Russell 1999).
     """
+    shape = params.get('reward_shape', 'domination')
+
+    if shape == 'potential':
+        if max_objectives is None or parent_cv is None or child_cv is None:
+            raise ValueError("reward_shape='potential' needs parent_cv, child_cv and "
+                             "max_objectives")
+        scale = params.get('potential_scale', 10.0)
+        phi_new = design_potential(child_obj, child_cv, max_objectives, min_mask)
+        phi_old = design_potential(parent_obj, parent_cv, max_objectives, min_mask)
+
+        # Explicit price per edit, since the shaping term is length-neutral. This does
+        # break potential-invariance and so changes the optimal policy, which is intended:
+        # the operator should prefer the same improvement in fewer edits.
+        step_cost = params.get('step_cost', 0.0)
+        return scale * (phi_new - phi_old) - step_cost
+
     step_penalty = params.get('step_penalty', 0.01)
-    
+
     if is_constrained:
         return -1.0 - step_penalty
     
@@ -426,33 +503,6 @@ def sample_next_batch(all_des, all_obj, all_constraints, eval_function,
         all_obj.append(objs)
         all_constraints.append(is_constrained)
     return designs, obj_values, all_des, all_obj, all_constraints, NFE
-
-
-def calculate_pareto_progress(all_des, all_obj, all_constraints, hv_obj, hv_ind, NFE):
-    """Calculate Pareto front and hypervolume over time (from your original code)"""
-    pareto_front_des = []
-    pareto_front_obj = []
-    hypervolumes = []
-    
-    for obj in range(NFE):
-        if all_constraints[obj] == False or len(hypervolumes) == 0: # check this to save computational time
-            pfront_obj = hv_obj[:obj+1]
-            pfront_des = all_des[:obj+1]
-            pfront_mask = is_pareto_efficient(pfront_obj, return_mask=True)
-            if pfront_mask[-1]:
-                pareto_front_obj.append(pfront_obj[pfront_mask])
-                pareto_front_des.append(pfront_des[pfront_mask])
-                hypervolumes.append(hv_ind(pfront_obj[pfront_mask]))
-            else:
-                hypervolumes.append(hypervolumes[-1])
-                pareto_front_obj.append(pareto_front_obj[-1])
-                pareto_front_des.append(pareto_front_des[-1])
-        else:
-            hypervolumes.append(hypervolumes[-1])
-            pareto_front_obj.append(pareto_front_obj[-1])
-            pareto_front_des.append(pareto_front_des[-1])
-    
-    return pareto_front_des, pareto_front_obj, hypervolumes
 
 
 def plot_training_results(actor_loss, critic_loss, kl, avg_reward, params, suffix=""):

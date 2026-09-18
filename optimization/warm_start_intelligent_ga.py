@@ -6,7 +6,7 @@ from pymoo.indicators.hv import HV
 import torch
 
 from evaluation.truss_problem import TrussProblem
-from utils.hypervolume_utils import is_pareto_efficient
+from utils.hypervolume_utils import track_pareto_progress
 from optimization.transformer_rand_weights_state import Actor as Actor_warm_start
 from optimization.transformer_design_repair import Actor as Actor_mutation
 
@@ -126,28 +126,8 @@ def run_warm_start_intelligent_ga(max_values, params):
         if objective_min_max[i].lower() == 'max':
             hv_obj[:,i] = 1 - norm_obj[:,i]
 
-    pareto_front_des = []
-    pareto_front_obj = []
-    hypervolumes = []
-
-    for obj in range(NFE):
-        if all_constraints[obj] == False or len(hypervolumes) == 0: # check this to save computational time
-            pfront_obj = hv_obj[:obj+1]
-            pfront_des = all_des[:obj+1]
-            pfront_mask = is_pareto_efficient(pfront_obj, return_mask=True)
-            if pfront_mask[-1]:
-                pareto_front_obj.append(pfront_obj[pfront_mask])
-                pareto_front_des.append(pfront_des[pfront_mask])
-                hypervolumes.append(hv_ind(pfront_obj[pfront_mask]))
-            else:
-                hypervolumes.append(hypervolumes[-1])
-                pareto_front_obj.append(pareto_front_obj[-1])
-                pareto_front_des.append(pareto_front_des[-1])
-        else:
-            hypervolumes.append(hypervolumes[-1])
-            pareto_front_obj.append(pareto_front_obj[-1])
-            pareto_front_des.append(pareto_front_des[-1])
-
+    pareto_front_des, pareto_front_obj, hypervolumes = track_pareto_progress(
+        hv_obj, all_des, all_constraints, hv_ind)
     return all_des, all_obj, pareto_front_des, pareto_front_obj, hypervolumes, NFE
 
 
@@ -166,7 +146,8 @@ def get_model_warm_start(device, params, num_total_objs):
     input_dummy = torch.zeros((1, num_actions+num_total_objs), dtype=torch.float32).to(device)
     actor(input_dummy)
 
-    actor.load_state_dict(torch.load(f"results/{params['date_str']}/actor_model.pth"))
+    if not params.get('random_init_actor', False):
+        actor.load_state_dict(torch.load(f"results/{params['date_str']}/actor_model.pth"))
 
     return actor
 
@@ -217,6 +198,7 @@ def get_model_mutation(device, params, num_total_objs):
     input_dummy = torch.zeros((1, num_actions+num_total_objs), dtype=torch.float32).to(device)
     actor(input_dummy)
 
-    actor.load_state_dict(torch.load(f"results/{params['date_str']}/actor_repair_model.pth"))
+    if not params.get('random_init_actor', False):
+        actor.load_state_dict(torch.load(f"results/{params['date_str']}/actor_repair_model.pth"))
 
     return actor

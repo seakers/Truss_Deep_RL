@@ -9,7 +9,7 @@ from copy import deepcopy
 from pymoo.indicators.hv import HV
 
 from evaluation.truss_problem import TrussProblem
-from utils.hypervolume_utils import is_pareto_efficient
+from utils.hypervolume_utils import track_pareto_progress
 
 # Reuse directly from existing module [11]
 from optimization.ppo_rand_weights_state import run_epoch, get_models
@@ -186,24 +186,8 @@ def run_transfer_learning_ppo_state(max_values, params):
         if objective_min_max[i].lower() == 'max':
             hv_obj[:, i] = 1 - norm_obj[:, i]
 
-    pareto_front_des, pareto_front_obj, hypervolumes = [], [], []
-    for obj_idx in range(NFE):
-        if not all_constraints[obj_idx] or len(hypervolumes) == 0:
-            pfront_obj = hv_obj[:obj_idx + 1]
-            pfront_des = all_des[:obj_idx + 1]
-            pfront_mask = is_pareto_efficient(pfront_obj, return_mask=True)
-            if pfront_mask[-1]:
-                pareto_front_obj.append(pfront_obj[pfront_mask])
-                pareto_front_des.append(pfront_des[pfront_mask])
-                hypervolumes.append(hv_ind(pfront_obj[pfront_mask]))
-            else:
-                hypervolumes.append(hypervolumes[-1] if hypervolumes else 0)
-                pareto_front_obj.append(pareto_front_obj[-1] if pareto_front_obj else [])
-                pareto_front_des.append(pareto_front_des[-1] if pareto_front_des else [])
-        else:
-            hypervolumes.append(hypervolumes[-1] if hypervolumes else 0)
-            pareto_front_obj.append(pareto_front_obj[-1] if pareto_front_obj else [])
-            pareto_front_des.append(pareto_front_des[-1] if pareto_front_des else [])
+    pareto_front_des, pareto_front_obj, hypervolumes = track_pareto_progress(
+        hv_obj, all_des, all_constraints, hv_ind)
 
     # Save fine-tuned models
     torch.save(actor.state_dict(), f'results/{date_str}/actor_transfer_state_finetuned.pth')

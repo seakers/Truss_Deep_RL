@@ -7,7 +7,7 @@ from copy import deepcopy
 
 from optimization.transformer_rand_weights_state import Actor, Critic
 from evaluation.truss_problem import TrussProblem
-from utils.hypervolume_utils import is_pareto_efficient
+from utils.hypervolume_utils import track_pareto_progress, RunningParetoArchive
 
 def run_ppo_rand_weights_state(max_values, params, run_idx=0, best_hv_so_far=-np.inf):
     """
@@ -35,12 +35,30 @@ def run_ppo_rand_weights_state(max_values, params, run_idx=0, best_hv_so_far=-np
     ref_point = np.ones(num_objectives)
     hv_ind = HV(ref_point=ref_point)
 
+    # Running front for the hypervolume-contribution reward. Built regardless, but
+    # only read when params['reward_mode'] == 'hv'.
+    def to_hv(obj_values):
+        n = np.array(obj_values, dtype=float) / max_objectives
+        p = np.where(min_mask[:num_objectives], n, 1.0 - n)
+        return np.clip(p, 0.0, 1.0)          # points past the reference add no volume
+
+    archive = RunningParetoArchive(hv_ind)
+    # How often the archive resets. 0 never resets, so designs are scored against the
+    # whole run; a period of n scores them against the last n epochs instead.
+    reset_period = params.get('hv_reset_period')
+    if reset_period is None:
+        # back-compat: the older 'hv_archive' flag is equivalent to a period of 1
+        reset_period = 1 if params.get('hv_archive', 'global') == 'batch' else 0
+
     for epoch in range(epochs):
+        if reset_period and epoch % reset_period == 0:
+            archive = RunningParetoArchive(hv_ind)
         if epoch % 10 == 9:
             print(f"Epoch {epoch + 1}/{epochs}")
             
         actor, critic, NFE, epoch_data, stats = run_epoch(
-            actor, critic, NFE, max_values, min_mask, device, params
+            actor, critic, NFE, max_values, min_mask, device, params,
+            archive=archive, to_hv=to_hv
         )
 
         all_des.extend(epoch_data['des'])
@@ -68,28 +86,8 @@ def run_ppo_rand_weights_state(max_values, params, run_idx=0, best_hv_so_far=-np
         if objective_min_max[i].lower() == 'max':
             hv_obj[:,i] = 1 - norm_obj[:,i]
 
-    pareto_front_des = []
-    pareto_front_obj = []
-    hypervolumes = []
-
-    for obj in range(NFE):
-        if all_constraints[obj] == False or len(hypervolumes) == 0: # check this to save computational time
-            pfront_obj = hv_obj[:obj+1]
-            pfront_des = all_des[:obj+1]
-            pfront_mask = is_pareto_efficient(pfront_obj, return_mask=True)
-            if pfront_mask[-1]:
-                pareto_front_obj.append(pfront_obj[pfront_mask])
-                pareto_front_des.append(pfront_des[pfront_mask])
-                hypervolumes.append(hv_ind(pfront_obj[pfront_mask]))
-            else:
-                hypervolumes.append(hypervolumes[-1])
-                pareto_front_obj.append(pareto_front_obj[-1])
-                pareto_front_des.append(pareto_front_des[-1])
-        else:
-            hypervolumes.append(hypervolumes[-1])
-            pareto_front_obj.append(pareto_front_obj[-1])
-            pareto_front_des.append(pareto_front_des[-1])
-
+    pareto_front_des, pareto_front_obj, hypervolumes = track_pareto_progress(
+        hv_obj, all_des, all_constraints, hv_ind)
     # ── Best-HV model saving ──────────────────────────────────────────────────
     run_best_hv = hypervolumes[-1] if hypervolumes else 0.0
 
@@ -144,8 +142,14 @@ def discounted_cumulative_sums(x, discount):
     return scipy.signal.lfilter([1], [1, float(-discount)], x[::-1], axis=0)[::-1]
 
 
-def run_epoch(actor, critic, NFE, max_values, min_mask, device, params, eval_function_override=None):
+def run_epoch(actor, critic, NFE, max_values, min_mask, device, params, eval_function_override=None,
+              archive=None, to_hv=None):
     mini_batch_size = params['mini_batch_size']
+    reward_mode = params.get('reward_mode', 'scalarized')
+    hv_scale = params.get('hv_scale', 200.0)
+    infeasible_penalty = params.get('infeasible_penalty', 0.0)
+    if reward_mode == 'hv' and (archive is None or to_hv is None):
+        raise ValueError("reward_mode='hv' needs an archive and a to_hv mapping")
 
     # Use override if provided, otherwise create default
     if eval_function_override is not None:
@@ -174,7 +178,8 @@ def run_epoch(actor, critic, NFE, max_values, min_mask, device, params, eval_fun
 
     # Generate Weights for all 5 dimensions
     weights_nonnorm = np.random.rand(mini_batch_size, num_total_objs)
-    weights_nonnorm[:, -2:] = 1.0  # Equal weights for constraint values
+    if params.get('pin_constraint_weights', True):
+        weights_nonnorm[:, -2:] = 1.0  # Equal weights for constraint values
     weights = weights_nonnorm / weights_nonnorm.sum(axis=1, keepdims=True)
 
     for idx in range(mini_batch_size):
@@ -206,21 +211,32 @@ def run_epoch(actor, critic, NFE, max_values, min_mask, device, params, eval_fun
         epoch_constraint_vals.append(constraint_vals)
         objectives_raw.append(obj_values)
 
-        obj_arr = np.array(obj_values + constraint_vals, dtype=float)
-        max_obj_arr = np.array(max_values, dtype=float)
-
-        if constraints:
-            # For constrained designs: give -max_obj for minimization objectives, 0 for maximization ones
-            reward_vec = np.where(min_mask, -np.ones(num_total_objs), 0.0)
-            reward_vec[-2:] = np.array(constraint_vals)
-            reward_vec[-2:][min_mask[-2:]] = -reward_vec[-2:][min_mask[-2:]]
-
+        if reward_mode == 'hv':
+            # Reward is the hypervolume this design adds to the running front. Infeasible
+            # designs score 0 by default; infeasible_penalty grades them by violation.
+            if constraints:
+                step_reward = (-infeasible_penalty * float(np.sum(constraint_vals))
+                               if infeasible_penalty else 0.0)
+            else:
+                step_reward = archive.offer(to_hv(obj_values))[1] * hv_scale
         else:
-            # For valid designs: negate only minimization objectives, keep maximization objectives positive (normalized)
-            norm = obj_arr / max_obj_arr
-            reward_vec = np.where(min_mask, -norm, norm)
+            obj_arr = np.array(obj_values + constraint_vals, dtype=float)
+            max_obj_arr = np.array(max_values, dtype=float)
 
-        rewards[idx][-1] = rewards[idx][-1] + np.dot(weights[idx], reward_vec)
+            if constraints:
+                # For constrained designs: give -max_obj for minimization objectives, 0 for maximization ones
+                reward_vec = np.where(min_mask, -np.ones(num_total_objs), 0.0)
+                reward_vec[-2:] = np.array(constraint_vals)
+                reward_vec[-2:][min_mask[-2:]] = -reward_vec[-2:][min_mask[-2:]]
+
+            else:
+                # For valid designs: negate only minimization objectives, keep maximization objectives positive (normalized)
+                norm = obj_arr / max_obj_arr
+                reward_vec = np.where(min_mask, -norm, norm)
+
+            step_reward = float(np.dot(weights[idx], reward_vec))
+
+        rewards[idx][-1] = rewards[idx][-1] + step_reward
 
 
     # --- 3. Sample Critic ---
@@ -269,6 +285,7 @@ def run_epoch(actor, critic, NFE, max_values, min_mask, device, params, eval_fun
 
     # --- 5. Prepare Tensors ---
     observation_tensor = []
+    action_pos_tensor = []
     action_tensor = []
     logprob_tensor = []
     advantage_tensor = []
@@ -282,6 +299,9 @@ def run_epoch(actor, critic, NFE, max_values, min_mask, device, params, eval_fun
             padded_obs = obs_fragment + [0] * (num_actions+num_total_objs - len(obs_fragment))
             
             observation_tensor.append(padded_obs)
+            # The slot the actor read when it chose this action: it saw the weights plus
+            # `step` earlier actions and took its distribution from the last position.
+            action_pos_tensor.append(num_total_objs + step - 1)
             action_tensor.append(actions[batch_idx][step])
             logprob_tensor.append(logprobs[batch_idx][step])
             advantage_tensor.append(all_advantages[batch_idx][step])
@@ -289,6 +309,7 @@ def run_epoch(actor, critic, NFE, max_values, min_mask, device, params, eval_fun
             weights_tensor.append(weights[batch_idx])
 
     observation_tensor = torch.tensor(observation_tensor, dtype=torch.float32).to(device)
+    action_pos_tensor = torch.tensor(action_pos_tensor, dtype=torch.long).to(device)
     action_tensor = torch.tensor(action_tensor, dtype=torch.float32).to(device)
     logprob_tensor = torch.tensor(logprob_tensor, dtype=torch.float32).to(device)
     advantage_tensor = torch.tensor(advantage_tensor, dtype=torch.float32).to(device)
@@ -305,7 +326,8 @@ def run_epoch(actor, critic, NFE, max_values, min_mask, device, params, eval_fun
             observation_tensor, 
             action_tensor, 
             logprob_tensor,
-            advantage_tensor
+            advantage_tensor,
+            action_pos_tensor
         )
         final_actor_loss = actor_loss
         final_kl = kl

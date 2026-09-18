@@ -7,7 +7,7 @@ from copy import deepcopy
 
 from optimization.transformer_rand_weights_uninformed import Actor, Critic
 from evaluation.truss_problem import TrussProblem
-from utils.hypervolume_utils import is_pareto_efficient
+from utils.hypervolume_utils import track_pareto_progress
 
 def run_ppo_rand_weights_uninformed(max_values, params):
     """
@@ -68,28 +68,8 @@ def run_ppo_rand_weights_uninformed(max_values, params):
         if objective_min_max[i].lower() == 'max':
             hv_obj[:,i] = 1 - norm_obj[:,i]
 
-    pareto_front_des = []
-    pareto_front_obj = []
-    hypervolumes = []
-
-    for obj in range(NFE):
-        if all_constraints[obj] == False or len(hypervolumes) == 0: # check this to save computational time
-            pfront_obj = hv_obj[:obj+1]
-            pfront_des = all_des[:obj+1]
-            pfront_mask = is_pareto_efficient(pfront_obj, return_mask=True)
-            if pfront_mask[-1]:
-                pareto_front_obj.append(pfront_obj[pfront_mask])
-                pareto_front_des.append(pfront_des[pfront_mask])
-                hypervolumes.append(hv_ind(pfront_obj[pfront_mask]))
-            else:
-                hypervolumes.append(hypervolumes[-1])
-                pareto_front_obj.append(pareto_front_obj[-1])
-                pareto_front_des.append(pareto_front_des[-1])
-        else:
-            hypervolumes.append(hypervolumes[-1])
-            pareto_front_obj.append(pareto_front_obj[-1])
-            pareto_front_des.append(pareto_front_des[-1])
-
+    pareto_front_des, pareto_front_obj, hypervolumes = track_pareto_progress(
+        hv_obj, all_des, all_constraints, hv_ind)
     torch.save(actor.state_dict(), f'results/{date_str}/actor_model.pth')
     torch.save(critic.state_dict(), f'results/{date_str}/critic_model.pth')
 

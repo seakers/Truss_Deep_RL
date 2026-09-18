@@ -100,13 +100,18 @@ class Actor(nn.Module):
         self.scaler = GradScaler('cuda' if torch.cuda.is_available() else 'cpu')
         self.clip_ratio = params['clip_ratio']
         
+        # Dropout defaults to 0. Any dropout active during rollout makes the PPO importance
+        # ratio differ from 1.0 at the first update, so clipping fires on sampling noise
+        # rather than on actual policy change.
+        dropout = params.get('dropout', 0.0)
+
         self.encoder = nn.Linear(1, self.dense_dim)
-        self.positional_encoding = PositionalEncoding(self.dense_dim)
+        self.positional_encoding = PositionalEncoding(self.dense_dim, dropout=dropout)
         self.transformer_decoder = CustomTransformerDecoder(
             d_model=self.dense_dim,
             num_layers=1,
             dim_feedforward=self.dense_dim,
-            dropout=0.1
+            dropout=dropout
         )
         self.output_layer = nn.Linear(self.dense_dim, self.action_length)
 
@@ -127,7 +132,9 @@ class Actor(nn.Module):
         with autocast(device_type=self.device.type, dtype=torch.float16):
             x = x.unsqueeze(-1)
             x = self.encoder(x)
-            x = self.positional_encoding(x)
+            # PositionalEncoding expects (seq, batch, d) but x arrives as (batch, seq, d).
+            # Without the transpose, self.pe is indexed by batch size instead of position.
+            x = self.positional_encoding(x.transpose(0, 1)).transpose(0, 1)
             mask = self.generate_square_subsequent_mask(x.size(1)).to(self.device) # x.size(1) is the sequence length
             x = self.transformer_decoder(x, tgt_mask=mask)
             x = self.output_layer(x)

@@ -101,9 +101,17 @@ class Actor(nn.Module):
         
         # Input: design variables + objectives
         self.input_dim = num_variables + num_objectives
-        
+
+        # Channel 0 is the design variable; use_stress adds per-bar utilisation as a
+        # second channel so the pointer can tell one bar from another.
+        self.use_stress = bool(params.get('use_stress', False))
+        # Control arm: rescale the design channel without adding stress, so a
+        # stress-vs-no-stress comparison is not confounded by the rescaling itself.
+        self.normalise_design = bool(params.get('normalise_design', False))
+        self.in_channels = 2 if self.use_stress else 1
+
         # Encode input design
-        self.design_encoder = nn.Linear(1, self.dense_dim)
+        self.design_encoder = nn.Linear(self.in_channels, self.dense_dim)
         self.positional_encoding = PositionalEncoding(self.dense_dim)
         
         # Transformer encoder to process design
@@ -138,16 +146,50 @@ class Actor(nn.Module):
         self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=1000, gamma=0.9)
     
     
+    def _normalise_input(self, x):
+        """
+        Put the input channels on comparable scales before the linear encoder.
+
+        Design indices run 0-49 while utilisation is around 0.02, so without this the
+        stress channel is numerically invisible next to the design channel.
+
+        Channel 0 is mapped to [0, 1]. Channel 1 is standardised across the bars of each
+        design, so what drives the choice is how unusual a bar is relative to its own
+        structure rather than its absolute stress. Gated on use_stress / normalise_design,
+        so the default single-channel behaviour is unchanged.
+        """
+        if not (self.use_stress or self.normalise_design):
+            return x
+        x = x.clone()
+        x[..., 0] = x[..., 0] / max(self.action_range - 1, 1)
+        if self.use_stress:
+            u = x[..., 1]
+            mu = u.mean(dim=-1, keepdim=True)
+            sd = u.std(dim=-1, keepdim=True)
+            x[..., 1] = (u - mu) / (sd + 1e-6)
+        return x
+
     def forward(self, design_state):
         """
         design_state: [batch, num_variables + num_objectives]
         Returns pointer logits, value logits, stop logits, and encoded features
         """
         with autocast(device_type=self.device.type, dtype=torch.float16):
+            # Accept [batch, tokens] or [batch, tokens, channels], so checkpoints trained
+            # either way still load.
+            if design_state.dim() == 2:
+                design_state = design_state.unsqueeze(-1)      # [batch, tokens, 1]
+            if design_state.size(-1) != self.in_channels:
+                raise ValueError(
+                    f"actor built for {self.in_channels} input channel(s) but got "
+                    f"{design_state.size(-1)}; set params['use_stress'] consistently "
+                    f"between training and deployment")
             batch_size = design_state.size(0)
-            
+
+            design_state = self._normalise_input(design_state)
+
             # Encode each element of the design separately
-            design_encoded = self.design_encoder(design_state.unsqueeze(-1))  # [batch, num_vars, dense_dim]
+            design_encoded = self.design_encoder(design_state)  # [batch, num_vars, dense_dim]
             design_encoded = self.positional_encoding(design_encoded.transpose(0, 1)).transpose(0, 1)
             
             # Transform through encoder
@@ -196,8 +238,10 @@ class Actor(nn.Module):
         """
         Sample variable to change, new value, and stop decision
         """
-        if design_state.dim() == 1:
-            design_state = design_state.unsqueeze(0)  # [1, vars+objs]
+        # [tokens] -> [1, tokens]; [tokens, channels] -> [1, tokens, channels]
+        if design_state.dim() == 1 or (self.use_stress and design_state.dim() == 2
+                                       and design_state.size(-1) == self.in_channels):
+            design_state = design_state.unsqueeze(0)
         pointer_logits, encoded, stop_logits = self.forward(design_state)
 
         # Sample variable to modify - use logits directly (cast to fp32)
@@ -263,6 +307,13 @@ class Actor(nn.Module):
                     (1 - self.clip_ratio) * advantage
                 )
                 policy_loss = torch.min(ratio * advantage, min_advantage)
+
+                # Entropy bonus on the pointer head only, which training otherwise
+                # flattens toward uniform.
+                ent_coef = self.params.get('pointer_entropy_coef', 0.0)
+                if ent_coef:
+                    pe = -(var_log_probs.exp() * var_log_probs).sum(-1)
+                    policy_loss = policy_loss + ent_coef * pe
                 policy_losses.append(-policy_loss)
                 all_kls.append(torch.mean(new_log_probs - old_log_probs))
 
@@ -296,8 +347,15 @@ class Critic(nn.Module):
         self.dense_dim = 16
         self.scaler = GradScaler('cuda' if torch.cuda.is_available() else 'cpu')
 
+        # Must mirror the Actor's channel count: the critic scores the same states the
+        # policy acted in, so if the actor reads a utilisation channel the critic must too.
+        self.use_stress = bool(params.get('use_stress', False))
+        self.normalise_design = bool(params.get('normalise_design', False))
+        self.action_range = int(params.get('action_range', 50))
+        self.in_channels = 2 if self.use_stress else 1
+
         # Transformer components - mirrors Actor structure in this file [5]
-        self.encoder = nn.Linear(1, self.dense_dim)
+        self.encoder = nn.Linear(self.in_channels, self.dense_dim)
         self.positional_encoding = PositionalEncoding(self.dense_dim)
         self.transformer_decoder = CustomTransformerDecoder(
             d_model=self.dense_dim,
@@ -326,9 +384,15 @@ class Critic(nn.Module):
         Returns: scalar value estimate [batch]
         """
         with autocast(device_type=self.device.type, dtype=torch.float16):
-            x = design_state.unsqueeze(-1)               # [batch, input_dim, 1]
+            if design_state.dim() == 2:
+                design_state = design_state.unsqueeze(-1)  # [batch, input_dim, 1]
+            # same scaling the Actor applies, or the critic scores differently-scaled
+            # states than the policy acted in
+            x = Actor._normalise_input(self, design_state)  # [batch, input_dim, channels]
             x = self.encoder(x)                           # [batch, input_dim, dense_dim]
-            x = self.positional_encoding(x)               # [batch, input_dim, dense_dim]
+            # PositionalEncoding expects (seq, batch, d); passing (batch, seq, d) indexes
+            # the table by batch size and gives every token the same encoding.
+            x = self.positional_encoding(x.transpose(0, 1)).transpose(0, 1)
             mask = self.generate_square_subsequent_mask(x.size(1)).to(self.device)
             x = self.transformer_decoder(x, tgt_mask=mask)  # [batch, input_dim, dense_dim]
             x = self.output_layer(x)                      # [batch, input_dim, 1]
@@ -343,10 +407,11 @@ class Critic(nn.Module):
             design_states = torch.tensor(design_states, dtype=torch.float32, device=self.device)
         if design_states.device != self.device:
             design_states = design_states.to(self.device)
-        # Handle extra batch dimensions safely (avoids the squeeze(1) bug from [3])
-        if design_states.dim() == 3 and design_states.size(0) == 1:
+        # Callers wrap the trajectory in one extra leading axis; strip it when present.
+        want = 3 if self.use_stress else 2
+        if design_states.dim() == want + 1 and design_states.size(0) == 1:
             design_states = design_states.squeeze(0)
-        elif design_states.dim() == 1:
+        elif design_states.dim() == want - 1:
             design_states = design_states.unsqueeze(0)
         return self.forward(design_states)
 

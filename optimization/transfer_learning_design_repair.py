@@ -9,12 +9,12 @@ from copy import deepcopy
 from pymoo.indicators.hv import HV
 
 from evaluation.truss_problem import TrussProblem
-from utils.hypervolume_utils import is_pareto_efficient
+from utils.hypervolume_utils import track_pareto_progress
 
 # Reuse from existing truss design_repair [3]
 from optimization.design_repair import (
     get_models, run_repair_epoch, generate_initial_designs,
-    sample_next_batch, calculate_pareto_progress, plot_training_results
+    sample_next_batch, plot_training_results
 )
 from optimization.transfer_learning_ppo_state import _estimate_max_values_truss
 
@@ -186,8 +186,8 @@ def run_transfer_learning_design_repair(max_values, params):
         if objective_min_max[i].lower() == 'max':
             hv_obj[:, i] = 1 - norm_obj[:, i]
 
-    pareto_front_des, pareto_front_obj, hypervolumes = calculate_pareto_progress(
-        all_des, all_obj, all_constraints, hv_obj, hv_ind, NFE
+    pareto_front_des, pareto_front_obj, hypervolumes = track_pareto_progress(
+        hv_obj, all_des, all_constraints, hv_ind
     )
 
     # Save fine-tuned models

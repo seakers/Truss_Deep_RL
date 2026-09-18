@@ -12,6 +12,7 @@ import torch
 from optimization.random_search import run_random_search
 from optimization.genetic_algorithm import run_genetic_algorithm
 from optimization.ppo_rand_weights_state import run_ppo_rand_weights_state
+from optimization.ppo_goal_conditioned import run_ppo_goal_conditioned
 from optimization.warm_start_ga import run_warm_start_ga
 from optimization.design_repair import run_design_repair_ppo
 from optimization.intelligent_mutation_ga import run_intelligent_mutation_ga
@@ -25,11 +26,12 @@ from evaluation.truss_problem import TrussProblem
 
 class OptimizationMethod:
     """Class to define optimization methods and their properties"""
-    def __init__(self, name, function, color, requires_max_values=False):
+    def __init__(self, name, function, color, requires_max_values=False, param_overrides=None):
         self.name = name
         self.function = function
         self.color = color
         self.requires_max_values = requires_max_values
+        self.param_overrides = param_overrides or {}
 
 
 def initialize_methods():
@@ -42,6 +44,16 @@ def initialize_methods():
         OptimizationMethod("Design Repair PPO", run_design_repair_ppo, "red", True),
         OptimizationMethod("Intelligent Mutation GA", run_intelligent_mutation_ga, "cyan", True),
         OptimizationMethod("Warm Start Intelligent GA", run_warm_start_intelligent_ga, "magenta", True),
+        # Conditions the policy on a target cell in objective space instead of on a
+        # random preference weighting. Works, but loses to the hv-reward synthesis PPO
+        # (experiments/RESULTS_ROUND3.md, section 4), so it is off by default.
+        # OptimizationMethod("Goal-Conditioned PPO", run_ppo_goal_conditioned, "brown", True),
+        # Ablations: same hybrid with a randomly initialised actor, to isolate what the
+        # training contributes.
+        # OptimizationMethod("Warm Start GA (untrained)", run_warm_start_ga, "olive", True,
+        #                    {'random_init_actor': True}),
+        # OptimizationMethod("Intelligent Mutation GA (untrained)", run_intelligent_mutation_ga, "teal", True,
+        #                    {'random_init_actor': True}),
         # OptimizationMethod("AOS GA", run_aos_ga, "darkgreen", True),
         # OptimizationMethod("Transfer Learning PPO State", run_transfer_learning_ppo_state, "lime", True),
         # OptimizationMethod("Transfer Learning Design Repair", run_transfer_learning_design_repair, "darkred", True),
@@ -170,7 +182,10 @@ def plot_hypervolumes(storage, methods, params):
 
             # plt.plot(stats['max'], label=f'{method.name} Max', color=method.color, linestyle='--', alpha=0.8)
             # plt.plot(stats['min'], label=f'{method.name} Min', color=method.color, linestyle=':', alpha=0.8)
-            plt.plot(stats['median'], label=f'{method.name} Median', color=method.color, linewidth=2)
+            for run_hv in hypervolumes:
+                plt.plot(run_hv, color=method.color, linewidth=0.6, alpha=0.25)
+            plt.plot(stats['median'], label=f'{method.name} Median (n={len(hypervolumes)})',
+                     color=method.color, linewidth=2)
             plt.fill_between(range(len(stats['q25'])), stats['q25'], stats['q75'],
                              color=method.color, alpha=0.1)
 
@@ -417,6 +432,15 @@ def main():
         'update_iterations': 5,
         'target_kl': 0.003,
         'chunk_size': 256,
+        # 'scalarized' is the original weighted-sum reward; 'hv' pays a design for the
+        # hypervolume it adds to a running front, reset every hv_reset_period epochs.
+        'reward_mode': 'hv',
+        'hv_reset_period': 3,
+        'hv_scale': 200.0,
+        # Repair PPO observation. 'design' makes the state used for the PPO update
+        # identical to the one the policy acted in and the one the hybrid GA deploys
+        # it on; 'full' reproduces the old mismatched behaviour.
+        'obs_mode': 'design',
         'date_str': datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
         'model_folder': None,
         # Transfer learning params
@@ -453,6 +477,9 @@ def main():
 
         best_hv = -np.inf           # Track best final HV across runs (for RL/repair models)
         all_run_max_values = []     # Collect max_values from each Random Search run
+
+        saved_params = {k: params.get(k) for k in method.param_overrides}
+        params.update(method.param_overrides)
 
         for run_idx in range(num_runs):
             print(f"\n--- {method.name} | Run {run_idx + 1}/{num_runs} ---")
@@ -531,6 +558,12 @@ def main():
                     continue
 
             print(f"Memory cleared after {method.name} run {run_idx}")
+
+        for k, v in saved_params.items():
+            if v is None:
+                params.pop(k, None)
+            else:
+                params[k] = v
 
         # ── Post-all-runs processing for this method ──────────────────────────
         if method.name == "Random Search":

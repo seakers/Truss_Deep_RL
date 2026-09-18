@@ -1,6 +1,4 @@
 import numpy as np
-from scipy.sparse import coo_matrix
-from scipy.sparse.linalg import spsolve
 from scipy.linalg import eigh
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
@@ -37,6 +35,7 @@ class TrussProblem:
         
         self.nodes, self.elements, self.fixed_nodes = self._generate_geometry()
         self.forces = self._generate_loads()
+        self._precompute()
         
     def _generate_geometry(self):
         nodes = []
@@ -65,68 +64,85 @@ class TrussProblem:
         forces[16 * 3 + 2] = -5000.0 * self.load_factor
         return forces
 
-    def solve(self, discrete_actions):
-        areas = np.array([self.area_map[a] for a in discrete_actions])
+    def _precompute(self):
+        # Element geometry is identical for every design; only the areas change.
+        vec = self.nodes[self.elements[:, 1]] - self.nodes[self.elements[:, 0]]
+        self.lengths = np.linalg.norm(vec, axis=1)
+        self.dirs = vec / self.lengths[:, None]
+
+        n_el = len(self.elements)
         n_dof = self.n_nodes * 3
-        K_global = np.zeros((n_dof, n_dof))
-        M_global = np.zeros((n_dof, n_dof))
-        
-        for idx, (n1, n2) in enumerate(self.elements):
-            p1, p2 = self.nodes[n1], self.nodes[n2]
-            L = np.linalg.norm(p2 - p1)
-            cx, cy, cz = (p2 - p1) / L
-            A = areas[idx]
-            k_val = (self.E * A / L)
-            T = np.array([[cx, cy, cz, 0, 0, 0], [0, 0, 0, cx, cy, cz]])
-            k_local = np.array([[1, -1], [-1, 1]]) * k_val
-            k_elem = T.T @ k_local @ T
-            indices = [n1*3, n1*3+1, n1*3+2, n2*3, n2*3+1, n2*3+2]
-            for r in range(6):
-                for c in range(6):
-                    K_global[indices[r], indices[c]] += k_elem[r, c]
 
-            m_elem = self.rho * A * L
-            for i in range(3):
-                M_global[n1*3+i, n1*3+i] += m_elem / 2.0
-                M_global[n2*3+i, n2*3+i] += m_elem / 2.0
+        T = np.zeros((n_el, 2, 6))
+        T[:, 0, :3] = self.dirs
+        T[:, 1, 3:] = self.dirs
+        k_local = np.array([[1.0, -1.0], [-1.0, 1.0]])
+        self.k_shape = np.einsum('eji,jk,ekl->eil', T, k_local, T).reshape(n_el, 36)
 
-        fixed_dofs = []
-        for n in self.fixed_nodes: fixed_dofs.extend([n*3, n*3+1, n*3+2])
-        free_dofs = [i for i in range(n_dof) if i not in fixed_dofs]
-        
-        K_reduced = K_global[np.ix_(free_dofs, free_dofs)]
-        F_reduced = self.forces[free_dofs]
-        M_reduced = M_global[np.ix_(free_dofs, free_dofs)]
-        
+        self.dof_map = np.stack([
+            self.elements[:, 0] * 3, self.elements[:, 0] * 3 + 1, self.elements[:, 0] * 3 + 2,
+            self.elements[:, 1] * 3, self.elements[:, 1] * 3 + 1, self.elements[:, 1] * 3 + 2,
+        ], axis=1)
+        self.scatter_idx = (np.repeat(self.dof_map, 6, axis=1).ravel() * n_dof
+                            + np.tile(self.dof_map, (1, 6)).ravel())
+        self.mass_dofs = self.dof_map.ravel()
+
+        fixed_dofs = [n * 3 + i for n in self.fixed_nodes for i in range(3)]
+        self.free_dofs = np.setdiff1d(np.arange(n_dof), fixed_dofs)
+        self.forces_free = self.forces[self.free_dofs]
+        self.area_lut = np.asarray(self.area_map)
+
+    def _assemble(self, areas):
+        n_dof = self.n_nodes * 3
+        k_scale = self.E * areas / self.lengths
+        K = np.bincount(self.scatter_idx,
+                        weights=(self.k_shape * k_scale[:, None]).ravel(),
+                        minlength=n_dof * n_dof).reshape(n_dof, n_dof)
+        m_half = self.rho * areas * self.lengths / 2.0
+        M_diag = np.bincount(self.mass_dofs, weights=np.repeat(m_half, 6), minlength=n_dof)
+        return K, M_diag
+
+    def _displace(self, K_reduced):
+        u_full = np.zeros(self.n_nodes * 3)
+        u_full[self.free_dofs] = np.linalg.solve(K_reduced, self.forces_free)
+        return u_full
+
+    def _axial_stress(self, u_full):
+        du = u_full[self.dof_map[:, 3:]] - u_full[self.dof_map[:, :3]]
+        delta_l = np.einsum('ij,ij->i', du, self.dirs)
+        return self.E * delta_l / self.lengths
+
+    def solve(self, discrete_actions):
+        design = np.asarray(discrete_actions)
+        areas = self.area_lut[design]
+        K_global, M_diag = self._assemble(areas)
+        K_reduced = K_global[np.ix_(self.free_dofs, self.free_dofs)]
+
         try:
-            u_reduced = spsolve(coo_matrix(K_reduced), F_reduced)
-        except:
+            u_full = self._displace(K_reduced)
+        except np.linalg.LinAlgError:
             return {'valid': False, 'reason': 'Singular'}
 
-        u_full = np.zeros(n_dof)
-        u_full[free_dofs] = u_reduced
-        
-        mass = 0
-        stress_viol = 0
-        for idx, (n1, n2) in enumerate(self.elements):
-            p1, p2 = self.nodes[n1], self.nodes[n2]
-            L = np.linalg.norm(p2 - p1)
-            mass += self.rho * areas[idx] * L
-            u_el = np.concatenate([u_full[n1*3:n1*3+3], u_full[n2*3:n2*3+3]])
-            vec = (p2 - p1) / L
-            delta_l = np.dot(u_el[3:] - u_el[:3], vec)
-            stress = (self.E * delta_l) / L
-            if discrete_actions[idx] > 0 and abs(stress) > self.stress_limit:
-                stress_viol += (abs(stress) - self.stress_limit)
+        mass = float(np.sum(self.rho * areas * self.lengths))
 
-        max_disp = np.max(np.abs(u_full))
-        disp_viol = max(0, max_disp - self.disp_limit)
+        stress = self._axial_stress(u_full)
+        active = design > 0
+        stress_viol = float(np.sum(np.clip(np.abs(stress) - self.stress_limit, 0.0, None)[active]))
+
+        max_disp = float(np.max(np.abs(u_full)))
+        disp_viol = max(0.0, max_disp - self.disp_limit)
 
         try:
-            vals, _ = eigh(K_reduced, M_reduced, subset_by_index=[0, 0])
-            frequency = np.sqrt(vals[0]) / (2 * np.pi) if vals[0] > 0 else 0.0
-        except:
+            vals, _ = eigh(K_reduced, np.diag(M_diag[self.free_dofs]), subset_by_index=[0, 0])
+            frequency = float(np.sqrt(vals[0]) / (2 * np.pi)) if vals[0] > 0 else 0.0
+        except Exception:
             frequency = 0.0
+
+        # Per-bar utilisation: |stress| / stress_limit, signed by tension/compression.
+        # Zeroed for removed bars, and clipped so a near-singular structure cannot feed
+        # huge values into a network.
+        util = np.clip(stress / self.stress_limit, -3.0, 3.0)
+        util[~active] = 0.0
 
         return { # transformation of large scaling objectives and constraints
             'mass': mass,
@@ -134,17 +150,35 @@ class TrussProblem:
             'frequency': frequency,
             'stress_viol': stress_viol/(stress_viol + 1),
             'disp_viol': disp_viol/(disp_viol + 1),
-            'valid': (stress_viol == 0 and disp_viol == 0)
+            'valid': (stress_viol == 0 and disp_viol == 0),
+            'utilisation': util,
         }
 
-    def evaluate(self, design):
+    def evaluate(self, design, return_utilisation=False):
+        """Returns (objectives, is_constrained, constraints).
+
+        With return_utilisation=True a fourth element is appended: the per-bar
+        utilisation vector (length n_elements). It is computed by the same solve either
+        way, so asking for it costs nothing extra. Existing callers are unaffected.
+        """
         res = self.solve(design)
-            
+
+        if not res.get('valid', False) and 'mass' not in res:
+            # singular structure: solve() bailed out early
+            objectives = [float(np.sum(self.rho * self.area_lut[np.asarray(design)]
+                                       * self.lengths)), 1.0, 0.0]
+            constraints = [1.0, 1.0]
+            if return_utilisation:
+                return objectives, True, constraints, np.zeros(self.n_elements)
+            return objectives, True, constraints
+
         # Objectives: [Mass, MaxDisp, Frequency] (All Positive)
         objectives = [res['mass'], res['max_disp'], res['frequency']]
         constraints = [res['stress_viol'], res['disp_viol']]
         is_constrained = (res['stress_viol'] > 1e-6 or res['disp_viol'] > 1e-6)
-        
+
+        if return_utilisation:
+            return objectives, is_constrained, constraints, res['utilisation']
         return objectives, is_constrained, constraints
 
     def render(self, discrete_actions, save_name, deformation_scale=100.0, show_constraints=True):
@@ -153,49 +187,15 @@ class TrussProblem:
         """
         res = self.solve(discrete_actions)
         
-        # Helper to re-run simple static solve for plotting vectors
-        # (Copying the solve logic here strictly for visualization data extraction)
-        areas = np.array([self.area_map[a] for a in discrete_actions])
-        n_dof = self.n_nodes * 3
-        K_global = np.zeros((n_dof, n_dof))
-        for idx, (n1, n2) in enumerate(self.elements):
-            p1, p2 = self.nodes[n1], self.nodes[n2]
-            L = np.linalg.norm(p2 - p1)
-            cx, cy, cz = (p2 - p1) / L
-            A = areas[idx]
-            k_val = (self.E * A / L)
-            T = np.array([[cx, cy, cz, 0, 0, 0], [0, 0, 0, cx, cy, cz]])
-            k_local = np.array([[1, -1], [-1, 1]]) * k_val
-            k_elem = T.T @ k_local @ T
-            indices = [n1*3, n1*3+1, n1*3+2, n2*3, n2*3+1, n2*3+2]
-            for r in range(6):
-                for c in range(6):
-                    K_global[indices[r], indices[c]] += k_elem[r, c]
-        
-        fixed_dofs = []
-        for n in self.fixed_nodes: fixed_dofs.extend([n*3, n*3+1, n*3+2])
-        free_dofs = [i for i in range(n_dof) if i not in fixed_dofs]
-        
+        areas = self.area_lut[np.asarray(discrete_actions)]
+
         if not res['valid']:
              print(f"Cannot visualize {save_name}: Structure Invalid.")
              return
 
-        K_reduced = K_global[np.ix_(free_dofs, free_dofs)]
-        F_reduced = self.forces[free_dofs]
-        u_reduced = spsolve(coo_matrix(K_reduced), F_reduced)
-        u_full = np.zeros(n_dof)
-        u_full[free_dofs] = u_reduced
-        
-        element_stresses = []
-        for idx, (n1, n2) in enumerate(self.elements):
-            p1, p2 = self.nodes[n1], self.nodes[n2]
-            L = np.linalg.norm(p2 - p1)
-            u_el = np.concatenate([u_full[n1*3:n1*3+3], u_full[n2*3:n2*3+3]])
-            vec = (p2 - p1) / L
-            delta_l = np.dot(u_el[3:] - u_el[:3], vec)
-            stress = (self.E * delta_l) / L
-            element_stresses.append(stress)
-        element_stresses = np.array(element_stresses)
+        K_reduced = self._assemble(areas)[0][np.ix_(self.free_dofs, self.free_dofs)]
+        u_full = self._displace(K_reduced)
+        element_stresses = self._axial_stress(u_full)
 
         # Plotting
         fig = plt.figure(figsize=(10, 8))

@@ -6,7 +6,7 @@ from pymoo.indicators.hv import HV
 import torch
 
 from evaluation.truss_problem import TrussProblem
-from utils.hypervolume_utils import is_pareto_efficient
+from utils.hypervolume_utils import track_pareto_progress
 from optimization.transformer_rand_weights_state import Actor, Critic
 
 
@@ -72,9 +72,15 @@ def run_warm_start_ga(max_values, params):
         gene_space=gene_space,
         parent_selection_type="nsga2",
         mutation_type="random",
-        mutation_probability=0.1,
+        # Was mutation_probability=0.1 -- a per-gene rate, so ~7 of 72 bars redrawn per
+        # offspring, the same setting that costs the plain GA ~0.28 hypervolume.
+        # See genetic_algorithm.py for the measured curve.
+        mutation_num_genes=params.get('mutation_num_genes', 1),
         initial_population=init_designs,
-        keep_elitism=0,
+        # Elitism carried over from genetic_algorithm.py, where it is worth +0.20.
+        # EXTRAPOLATED: this file uses nsga2 selection and a warm-started population,
+        # neither of which was in the round-6 sweep. Measure before trusting it.
+        keep_elitism=params.get('keep_elitism', 8),
         keep_parents=0,
         save_solutions=False,
     )
@@ -97,28 +103,8 @@ def run_warm_start_ga(max_values, params):
         if objective_min_max[i].lower() == 'max':
             hv_obj[:,i] = 1 - norm_obj[:,i]
 
-    pareto_front_des = []
-    pareto_front_obj = []
-    hypervolumes = []
-
-    for obj in range(NFE):
-        if all_constraints[obj] == False or len(hypervolumes) == 0: # check this to save computational time
-            pfront_obj = hv_obj[:obj+1]
-            pfront_des = all_des[:obj+1]
-            pfront_mask = is_pareto_efficient(pfront_obj, return_mask=True)
-            if pfront_mask[-1]:
-                pareto_front_obj.append(pfront_obj[pfront_mask])
-                pareto_front_des.append(pfront_des[pfront_mask])
-                hypervolumes.append(hv_ind(pfront_obj[pfront_mask]))
-            else:
-                hypervolumes.append(hypervolumes[-1])
-                pareto_front_obj.append(pareto_front_obj[-1])
-                pareto_front_des.append(pareto_front_des[-1])
-        else:
-            hypervolumes.append(hypervolumes[-1])
-            pareto_front_obj.append(pareto_front_obj[-1])
-            pareto_front_des.append(pareto_front_des[-1])
-
+    pareto_front_des, pareto_front_obj, hypervolumes = track_pareto_progress(
+        hv_obj, all_des, all_constraints, hv_ind)
     return all_des, all_obj, pareto_front_des, pareto_front_obj, hypervolumes, NFE
 
 
@@ -137,7 +123,8 @@ def get_models(device, params, num_total_objs):
     input_dummy = torch.zeros((1, num_actions+num_total_objs), dtype=torch.float32).to(device)
     actor(input_dummy)
 
-    actor.load_state_dict(torch.load(f"results/{params['date_str']}/actor_model.pth"))
+    if not params.get('random_init_actor', False):
+        actor.load_state_dict(torch.load(f"results/{params['date_str']}/actor_model.pth"))
 
     return actor
 
