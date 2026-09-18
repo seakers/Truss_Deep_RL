@@ -1,0 +1,4 @@
+{"job_id": 1, "name": "original default (8 bars, no elitism)", "seed": 5, "hv_clip": 0.5096540647792849, "escape": 0.0, "valid_frac": 0.9625374625374625, "secs": 72.35885489999782}
+{"job_id": 9, "name": "round-5 default (1 bar, no elitism)", "seed": 5, "hv_clip": 0.6115946395711396, "escape": 0.4610144541710384, "valid_frac": 0.9967688561438561, "secs": 67.07556009999826}
+{"job_id": 17, "name": "tuned (1 bar, elitism 8, tournament)", "seed": 5, "hv_clip": 0.7844509530218007, "escape": 0.25678399193838625, "valid_frac": 0.9912419956120793, "secs": 87.05820700002369}
+{"job_id": 25, "name": "tuned but sss selection", "seed": 5, "hv_clip": 0.7762938861803814, "escape": 0.24757308379538379, "valid_frac": 0.9683040810502284, "secs": 87.03272789999028}

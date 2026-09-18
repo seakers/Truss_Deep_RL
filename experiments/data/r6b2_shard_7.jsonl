@@ -1,0 +1,3 @@
+{"job_id": 7, "name": "tuned winner", "seed": 11, "cfg": "{\"elitism\": 8, \"n_edits\": 1, \"selection\": \"tournament\"}", "hv": 0.5824532058939336, "escape": 0.0, "valid_frac": 0.9913133439166651, "nfe": 56063, "secs": 89.28090070001781}
+{"job_id": 15, "name": "round-5 default (1 bar, no elitism)", "seed": 11, "cfg": "{\"n_edits\": 1, \"elitism\": 0}", "hv": 0.41623579276733247, "escape": 0.0, "valid_frac": 0.9965659340659341, "nfe": 64064, "secs": 72.1719084000215}
+{"job_id": 23, "name": "original default (8 bars, no elitism)", "seed": 11, "cfg": "{\"n_edits\": 8, \"elitism\": 0}", "hv": 0.25800829039529305, "escape": 0.0, "valid_frac": 0.9628652597402597, "nfe": 64064, "secs": 72.61409269997966}

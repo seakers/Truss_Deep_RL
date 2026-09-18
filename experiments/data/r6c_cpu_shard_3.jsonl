@@ -1,0 +1,4 @@
+{"job_id": 3, "name": "random search", "seed": 3, "hv": 0.4027632366506009, "nfe": 64000, "secs": 48.43946339999093}
+{"job_id": 15, "name": "GA original (8 bars, no elit)", "seed": 7, "hv": 0.25749047428199806, "nfe": 64064, "secs": 271.06586750000133}
+{"job_id": 27, "name": "IMGA untrained actor", "seed": 3, "hv": 0.37521480146843933, "nfe": 64064, "secs": 4524.226184799976}
+{"job_id": 39, "name": "IMGA trained actor", "seed": 7, "hv": 0.3834577152761782, "nfe": 64064, "secs": 1137.9949041000218}

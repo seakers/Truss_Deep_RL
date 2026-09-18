@@ -1,0 +1,3 @@
+{"job_id": 5, "name": "GA mutate 4 bars", "seed": 1, "hv": 0.64229156814821, "nfe": 64064, "valid_frac": 0.9832823426573427, "secs": 61.93142989999615}
+{"job_id": 13, "name": "GA mutate 1 bar", "seed": 1, "hv": 0.8309551736966936, "nfe": 64064, "valid_frac": 0.9963317932067932, "secs": 60.94788849999895}
+{"job_id": 21, "name": "GA uniform geometric edits", "seed": 1, "hv": 0.7761669508464581, "nfe": 64064, "valid_frac": 0.9919455544455544, "secs": 63.73821779998252}

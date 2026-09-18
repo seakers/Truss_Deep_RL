@@ -1,0 +1,3 @@
+{"job_id": 5, "name": "random search", "seed": 5, "hv": 0.38728504556331883, "nfe": 64000, "secs": 23.845726400002604}
+{"job_id": 17, "name": "GA tuned (round-6 default)", "seed": 1, "hv": 0.5809096402764193, "nfe": 56064, "secs": 240.40229840000393}
+{"job_id": 29, "name": "IMGA untrained actor", "seed": 5, "hv": 0.35710069547040385, "nfe": 64064, "secs": 3900.1737692999886}

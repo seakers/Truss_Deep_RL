@@ -1,0 +1,12 @@
+IMGA MUTATION OPERATOR: does better training help?  (n=8, 16,000 NFE)
+  repair actor used                   n   mean HV       sd
+  random init (untrained)             8    0.6750   0.0395
+  trained 9,600 NFE, domination       8    0.6394   0.0285
+  trained 32,000 NFE, domination      8    0.6811   0.0240
+  trained 32,000 NFE, hv reward       8    0.7169   0.0449
+  plain GA (no learned operator)      8    0.5065   0.0231
+
+  vs random-init operator:
+    trained 9,600 NFE, domination      delta=-0.0355 (-5.3%) p=0.0601 ns
+    trained 32,000 NFE, domination     delta=+0.0061 (+0.9%) p=0.7161 ns
+    trained 32,000 NFE, hv reward      delta=+0.0420 (+6.2%) p=0.0677 ns

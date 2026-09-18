@@ -1,0 +1,4 @@
+{"job_id": 4, "name": "goal-conditioned", "seed": 4, "hv": 0.5195019941905765, "valid_frac": 0.096859375, "nfe": 64000, "wall": 1333.2447505000018}
+{"job_id": 10, "name": "goal-conditioned + hv term", "seed": 2, "hv": 0.5806343501226868, "valid_frac": 0.083875, "nfe": 64000, "wall": 1331.7861253999872}
+{"job_id": 16, "name": "front bonus only (no goals)", "seed": 0, "hv": 0.4408718486040641, "valid_frac": 0.16078125, "nfe": 64000, "wall": 1351.546489500004}
+{"job_id": 22, "name": "front bonus only (no goals)", "seed": 6, "hv": 0.5049088166334568, "valid_frac": 0.49890625, "nfe": 64000, "wall": 1336.6802147999988}

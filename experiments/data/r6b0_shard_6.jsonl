@@ -1,0 +1,9 @@
+{"job_id": 6, "name": "elitism  0, 2 bar(s)", "seed": 2, "cfg": "{\"elitism\": 0, \"n_edits\": 2}", "hv": 0.3622047933821777, "escape": 0.0, "valid_frac": 0.9930850399600399, "nfe": 64064, "secs": 62.24752360000275}
+{"job_id": 14, "name": "elitism  2, 1 bar(s)", "seed": 2, "cfg": "{\"elitism\": 2, \"n_edits\": 1}", "hv": 0.4379011441816032, "escape": 0.0, "valid_frac": 0.9968258060358023, "nfe": 62063, "secs": 68.98053189998609}
+{"job_id": 22, "name": "elitism  2, 4 bar(s)", "seed": 2, "cfg": "{\"elitism\": 2, \"n_edits\": 4}", "hv": 0.36621194826701553, "escape": 0.0, "valid_frac": 0.9799883990719258, "nfe": 62064, "secs": 80.72962699999334}
+{"job_id": 30, "name": "elitism  4, 2 bar(s)", "seed": 2, "cfg": "{\"elitism\": 4, \"n_edits\": 2}", "hv": 0.5262938108280226, "escape": 0.0, "valid_frac": 0.9881792754395312, "nfe": 60064, "secs": 89.33603860001313}
+{"job_id": 38, "name": "elitism  8, 1 bar(s)", "seed": 2, "cfg": "{\"elitism\": 8, \"n_edits\": 1}", "hv": 0.5899013326124134, "escape": 0.0, "valid_frac": 0.986675941780822, "nfe": 56064, "secs": 89.69176879999577}
+{"job_id": 46, "name": "elitism  8, 4 bar(s)", "seed": 2, "cfg": "{\"elitism\": 8, \"n_edits\": 4}", "hv": 0.4415263849495761, "escape": 0.0, "valid_frac": 0.9777932363013698, "nfe": 56064, "secs": 88.27775119998842}
+{"job_id": 54, "name": "elitism 16, 2 bar(s)", "seed": 2, "cfg": "{\"elitism\": 16, \"n_edits\": 2}", "hv": 0.5300078916066056, "escape": 0.0, "valid_frac": 0.9761359853528628, "nfe": 48064, "secs": 81.6482211999828}
+{"job_id": 62, "name": "elitism 32, 1 bar(s)", "seed": 2, "cfg": "{\"elitism\": 32, \"n_edits\": 1}", "hv": 0.5544875509551324, "escape": 0.0, "valid_frac": 0.9894260761072988, "nfe": 32060, "secs": 78.54021649999777}
+{"job_id": 70, "name": "elitism 32, 4 bar(s)", "seed": 2, "cfg": "{\"elitism\": 32, \"n_edits\": 4}", "hv": 0.45721073360394987, "escape": 0.0, "valid_frac": 0.9780439121756487, "nfe": 32064, "secs": 75.50676610000664}

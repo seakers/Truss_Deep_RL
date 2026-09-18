@@ -1,0 +1,4 @@
+{"job_id": 7, "name": "select nsga2", "seed": 3, "cfg": "{\"elitism\": 8, \"n_edits\": 1, \"selection\": \"nsga2\"}", "hv": 0.5612894172496742, "escape": 0.0, "valid_frac": 0.9823056204626938, "nfe": 56063, "secs": 85.03276309999637}
+{"job_id": 15, "name": "select rank", "seed": 3, "cfg": "{\"elitism\": 8, \"n_edits\": 1, \"selection\": \"rank\"}", "hv": 0.1756597850936338, "escape": 0.0, "valid_frac": 0.014215896118721462, "nfe": 56064, "secs": 122.60657720000017}
+{"job_id": 23, "name": "crossover uniform", "seed": 3, "cfg": "{\"elitism\": 8, \"n_edits\": 1, \"crossover\": \"uniform\"}", "hv": 0.5245802605382266, "escape": 0.0, "valid_frac": 0.991099457762557, "nfe": 56064, "secs": 86.32338310001069}
+{"job_id": 31, "name": "pop 128", "seed": 3, "cfg": "{\"elitism\": 8, \"n_edits\": 1, \"pop\": 128}", "hv": 0.5668361367180366, "escape": 0.0, "valid_frac": 0.9929648909807574, "nfe": 60127, "secs": 141.21036970001296}

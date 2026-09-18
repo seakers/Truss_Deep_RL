@@ -1,0 +1,2 @@
+{"job_id": 3, "name": "synthesis PPO (hv, reset 3)", "seed": 3, "hv": 0.3055882360564024, "nfe": 64000, "secs": 4757.456390200008}
+{"job_id": 7, "name": "synthesis PPO (hv, reset 3)", "seed": 7, "hv": 0.2842920284770232, "nfe": 64000, "secs": 1699.808746099996}

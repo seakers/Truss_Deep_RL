@@ -1,0 +1,9 @@
+{"job_id": 2, "kind": "imga64", "name": "DOM_DES @64k", "tseed": 2, "k": 2, "hv": 0.7598828605244672, "NFE": 64032, "wall": 452.1344228000089}
+{"job_id": 7, "kind": "imga64", "name": "DOM_DES @64k", "tseed": 2, "k": 7, "hv": 0.8087305917456088, "NFE": 64032, "wall": 452.33902759998455}
+{"job_id": 12, "kind": "imga64", "name": "random init @64k", "tseed": null, "k": 6, "hv": 0.7204707157725606, "NFE": 64032, "wall": 828.3538346999849}
+{"job_id": 17, "kind": "imga64", "name": "random init @64k", "tseed": null, "k": 11, "hv": 0.7875096191756743, "NFE": 64032, "wall": 909.4846972999803}
+{"job_id": 1002, "kind": "train", "name": null, "tseed": 7, "k": null, "hv": 0.3201929063872301, "NFE": 32002, "valid_frac": 0.7363289794387851, "reward_first": -0.3519375, "reward_last": -0.23350000000000004, "wall": 877.8721476999926}
+{"job_id": 2002, "kind": "imga", "name": "DOM_DES", "tseed": 5, "k": 11, "hv": 0.6717679261186704, "NFE": 16032, "wall": 111.22985870001139}
+{"job_id": 2007, "kind": "imga", "name": "random init", "tseed": null, "k": 13, "hv": 0.6665499126115156, "NFE": 16032, "wall": 189.63363529997878}
+{"job_id": 2012, "kind": "imga", "name": "DOM_DES", "tseed": 8, "k": 16, "hv": 0.5980158859625848, "NFE": 16032, "wall": 136.28561700001592}
+{"job_id": 2017, "kind": "imga", "name": "random init", "tseed": null, "k": 18, "hv": 0.7653286356260887, "NFE": 16032, "wall": 278.83522169999196}

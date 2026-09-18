@@ -1,0 +1,3 @@
+{"job_id": 10, "name": "GA original (8 bars, no elit)", "seed": 2, "hv": 0.2661194631250083, "nfe": 64064, "secs": 162.38929339998867}
+{"job_id": 22, "name": "GA tuned (round-6 default)", "seed": 6, "hv": 0.590419118956801, "nfe": 56064, "secs": 215.32940429999144}
+{"job_id": 34, "name": "IMGA trained actor", "seed": 2, "hv": 0.41069663578818705, "nfe": 64064, "secs": 2598.3887456000084}

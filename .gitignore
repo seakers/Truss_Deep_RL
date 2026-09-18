@@ -11,3 +11,11 @@ chiplet_model/dse/lib/__pycache__/
 chiplet_model/dse/chiplet_library/__pycache__/
 chiplet_model/dse/chiplet_library/chiplet-actuary/ChipletHL/__pycache__/
 chiplet_model/dse/lib/__pycache__/
+# Papers and other non-code files kept at the repo root
+/*.pdf
+
+# Experiment scratch. Shell logs and trained checkpoints (~130 MB of .pth files under
+# experiments/*work*/) are not committed. The raw per-run records that the writeups
+# cite are small and are committed under experiments/data/.
+experiments/logs/
+experiments/*work*/

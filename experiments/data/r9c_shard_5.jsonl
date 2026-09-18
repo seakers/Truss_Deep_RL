@@ -1,0 +1,3 @@
+{"job_id": 5, "name": "IMGA untrained, OLD ga", "seed": 2, "hv": 0.5599951981262224, "nfe": 64000, "secs": 3361.9450980999973}
+{"job_id": 11, "name": "IMGA A_baseline, TUNED ga", "seed": 2, "hv": 0.7970220221029047, "nfe": 64038, "secs": 1487.0641609999875}
+{"job_id": 17, "name": "IMGA F_stress, OLD ga", "seed": 2, "hv": 0.7324662724880187, "nfe": 64019, "secs": 2294.788155699993}

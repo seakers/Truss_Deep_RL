@@ -1,0 +1,4 @@
+{"job_id": 1, "name": "1 bar, sss, no elitism (new default)", "seed": 1, "hv": 0.8309551736966936, "nfe": 64064, "valid_frac": 0.9963317932067932, "secs": 99.08089499999187}
+{"job_id": 9, "name": "+ nsga2 selection", "seed": 1, "hv": 0.7970978003478892, "nfe": 64064, "valid_frac": 0.9965815434565435, "secs": 106.2960806999763}
+{"job_id": 17, "name": "+ pop 128 x 500 gen", "seed": 1, "hv": 0.7770244776496622, "nfe": 64128, "valid_frac": 0.9961015469061876, "secs": 145.82918719999725}
+{"job_id": 25, "name": "+ two-point crossover", "seed": 1, "hv": 0.7969811981509667, "nfe": 64064, "valid_frac": 0.9964254495504495, "secs": 89.82098019999103}

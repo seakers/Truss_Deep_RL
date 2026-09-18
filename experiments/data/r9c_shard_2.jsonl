@@ -1,0 +1,4 @@
+{"job_id": 2, "name": "GA tuned, no operator", "seed": 2, "hv": 0.7948002230417907, "nfe": 64015, "secs": 205.14919029999874}
+{"job_id": 8, "name": "IMGA untrained, TUNED ga", "seed": 2, "hv": 0.7811271714275525, "nfe": 64025, "secs": 3575.0429323000135}
+{"job_id": 14, "name": "IMGA E_normdesign, TUNED ga", "seed": 2, "hv": 0.77370440727582, "nfe": 64037, "secs": 6470.750466400001}
+{"job_id": 20, "name": "IMGA F_stress, TUNED ga", "seed": 2, "hv": 0.7513341812993235, "nfe": 64009, "secs": 972.795878200006}

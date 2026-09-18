@@ -1,0 +1,5 @@
+{"job_id": 3, "name": "select sss", "seed": 3, "cfg": "{\"elitism\": 8, \"n_edits\": 1, \"selection\": \"sss\"}", "hv": 0.6240578017444887, "escape": 0.0, "valid_frac": 0.9917414337441807, "nfe": 56063, "secs": 83.67182150000008}
+{"job_id": 11, "name": "select tournament", "seed": 3, "cfg": "{\"elitism\": 8, \"n_edits\": 1, \"selection\": \"tournament\"}", "hv": 0.642440434658451, "escape": 0.0, "valid_frac": 0.9775074469792912, "nfe": 56063, "secs": 88.62842909997562}
+{"job_id": 19, "name": "crossover two_points", "seed": 3, "cfg": "{\"elitism\": 8, \"n_edits\": 1, \"crossover\": \"two_points\"}", "hv": 0.48862732417849786, "escape": 0.0, "valid_frac": 0.988156392694064, "nfe": 56064, "secs": 85.98755579997669}
+{"job_id": 27, "name": "pop 32", "seed": 3, "cfg": "{\"elitism\": 8, \"n_edits\": 1, \"pop\": 32}", "hv": 0.5955699846329131, "escape": 0.0, "valid_frac": 0.9817201390768462, "nfe": 48031, "secs": 52.27374520001467}
+{"job_id": 35, "name": "keep_parents 8", "seed": 3, "cfg": "{\"elitism\": 8, \"n_edits\": 1, \"keep_parents\": 8}", "hv": 0.6240578017444887, "escape": 0.0, "valid_frac": 0.9917414337441807, "nfe": 56063, "secs": 85.33474339998793}

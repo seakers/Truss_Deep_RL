@@ -1,0 +1,6 @@
+{"hv": 0.7818680163607108, "nfe": 64082, "front_size": 450, "valid_frac": 0.987207488299532, "job_id": 0, "name": "random", "seed": 0, "secs": 196.7628231048584}
+{"hv": 0.7840282763715525, "nfe": 64097, "front_size": 443, "valid_frac": 0.989240605021051, "job_id": 3, "name": "random", "seed": 3, "secs": 220.6489863395691}
+{"hv": 0.7481039789543846, "nfe": 64086, "front_size": 536, "valid_frac": 0.9765707867972796, "job_id": 6, "name": "supervised", "seed": 0, "secs": 865.6913342475891}
+{"hv": 0.7142095074690163, "nfe": 64100, "front_size": 418, "valid_frac": 0.9807284520394163, "job_id": 9, "name": "supervised", "seed": 3, "secs": 609.6715540885925}
+{"hv": 0.4804433158834226, "nfe": 64045, "front_size": 1004, "valid_frac": 0.9681379439602661, "job_id": 12, "name": "sup_greedy", "seed": 0, "secs": 529.733286857605}
+{"hv": 0.49232079887891916, "nfe": 64104, "front_size": 638, "valid_frac": 0.9883183408295853, "job_id": 15, "name": "sup_greedy", "seed": 3, "secs": 525.9108626842499}

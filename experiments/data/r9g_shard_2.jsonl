@@ -1,0 +1,3 @@
+{"job_id": 2, "name": "PPO synthesis, 72 bars", "kind": "state", "grouped": false, "seed": 2, "hv": 0.6014483981443167, "nfe": 64000, "front_size": 46, "secs": 2162.0321595668793}
+{"job_id": 6, "name": "GA tuned, 72 bars", "kind": "ga", "grouped": false, "seed": 0, "hv": 0.80760329196872, "nfe": 56064, "front_size": 748, "secs": 234.5737500190735}
+{"job_id": 10, "name": "GA tuned, 16 groups", "kind": "ga", "grouped": true, "seed": 1, "hv": 0.8349141004184032, "nfe": 56057, "front_size": 501, "secs": 316.37578105926514}

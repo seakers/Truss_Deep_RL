@@ -1,0 +1,9 @@
+{"job_id": 1, "kind": "train", "tag": "long-hv", "hv": 0.30490118274817474, "NFE": 32025, "wall": 1661.314038299999}
+{"job_id": 3, "kind": "imga", "tag": "long-domination", "seed": 1, "hv": 0.675216444074597, "NFE": 16032, "wall": 444.95781229999557}
+{"job_id": 5, "kind": "imga", "tag": "long-domination", "seed": 3, "hv": 0.6841016566208487, "NFE": 16032, "wall": 428.6293880000012}
+{"job_id": 7, "kind": "imga", "tag": "long-domination", "seed": 5, "hv": 0.6682222392193942, "NFE": 16032, "wall": 418.6924302999978}
+{"job_id": 9, "kind": "imga", "tag": "long-domination", "seed": 7, "hv": 0.7232848324587615, "NFE": 16032, "wall": 396.0218515000015}
+{"job_id": 11, "kind": "imga", "tag": "long-hv", "seed": 1, "hv": 0.7719329184468268, "NFE": 16032, "wall": 219.78850819999934}
+{"job_id": 13, "kind": "imga", "tag": "long-hv", "seed": 3, "hv": 0.7518983998112985, "NFE": 16032, "wall": 199.72360440000193}
+{"job_id": 15, "kind": "imga", "tag": "long-hv", "seed": 5, "hv": 0.7155578219640896, "NFE": 16032, "wall": 200.26481019999483}
+{"job_id": 17, "kind": "imga", "tag": "long-hv", "seed": 7, "hv": 0.6846864534537432, "NFE": 16032, "wall": 187.55448050000996}

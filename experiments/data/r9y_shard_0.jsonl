@@ -1,0 +1,2 @@
+{"job_id": 0, "name": "penalty 0.0 (current default)", "penalty": 0.0, "seed": 0, "hv": 0.5777136173076345, "nfe": 64000, "front_size": 66, "valid_frac": 0.0790625, "secs": 1947.0024280548096}
+{"job_id": 6, "name": "penalty 2.0", "penalty": 2.0, "seed": 0, "hv": 0.5291868379557295, "nfe": 64000, "front_size": 84, "valid_frac": 0.304265625, "secs": 921.4042258262634}

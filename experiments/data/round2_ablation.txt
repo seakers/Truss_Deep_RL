@@ -1,0 +1,16 @@
+HYBRID ABLATION @ 16,000 NFE   (identical NFE across arms)
+  arm                       n   mean HV       sd      min      max     NFE
+  plain GA                  8    0.5065   0.0231   0.4858   0.5540   16032
+  WarmStart untrained       8    0.5052   0.0146   0.4852   0.5321   16032
+  WarmStart trained         8    0.4990   0.0097   0.4853   0.5135   16032
+  IMGA untrained            8    0.6750   0.0395   0.5991   0.7245   16032
+  IMGA trained              8    0.6394   0.0285   0.5898   0.6898   16032
+
+Decomposition:
+  operator structure alone (IMGA untrained vs plain GA) delta=+0.1685 (+33.3%) p=0.0000 SIGNIFICANT
+  what the LEARNING adds (IMGA trained vs untrained) delta=-0.0355 (-5.3%) p=0.0601 ns
+  warm-start structure alone (untrained vs plain GA) delta=-0.0013 (-0.2%) p=0.8982 ns
+  what the LEARNING adds (WarmStart trained vs untrained) delta=-0.0062 (-1.2%) p=0.3338 ns
+  total hybrid effect (IMGA trained vs plain GA) delta=+0.1330 (+26.3%) p=0.0000 SIGNIFICANT
+
+total jobs: 40

@@ -1,0 +1,42 @@
+
+SYNTHESIS PPO @ 64,000 evaluations
+  config                          n   mean HV      sd     min     max       entropy   collapse ep     critic EV
+  baseline                        8    0.4303  0.0850  0.3427  0.5665         0.838           389         -0.54
+  entropy 0.01                    8    0.4189  0.0807  0.3496  0.5853         2.568           196         -0.27
+  entropy 0.01 decay              8    0.4271  0.0876  0.3501  0.5955         1.243           357         -0.45
+  all fixes                       8    0.3742  0.0219  0.3403  0.4058         1.161           397         -1.55
+  all fixes + entropy decay       8    0.3615  0.0165  0.3297  0.3873         1.478           292         -1.55
+  random search                   8    0.4059  0.0101  0.3911  0.4212             -             -             -
+
+  Welch t-test vs baseline:
+    entropy 0.01                   delta=-0.0114  p=0.7871  ns
+    entropy 0.01 decay             delta=-0.0032  p=0.9422  ns
+    all fixes                      delta=-0.0561  p=0.1085  ns
+    all fixes + entropy decay      delta=-0.0688  p=0.0566  ns
+    random search                  delta=-0.0244  p=0.4451  ns
+
+REPAIR PPO @ 4,800 NFE
+  config                          n   mean HV      sd     min     max
+  repair domination               8    0.2883  0.0086  0.2782  0.3036
+  repair front                    8    0.2922  0.0080  0.2820  0.3024
+  repair hv                       8    0.2962  0.0101  0.2794  0.3073
+
+  Welch t-test vs domination (current):
+    repair front                   delta=+0.0039 (+1.3%)  p=0.3661  ns
+    repair hv                      delta=+0.0079 (+2.7%)  p=0.1149  ns
+
+REPAIR PPO @ 12,800 NFE
+  config                          n   mean HV      sd     min     max
+  repair-big domination           6    0.3025  0.0122  0.2880  0.3237
+  repair-big front                6    0.3059  0.0124  0.2922  0.3221
+  repair-big hv                   6    0.3024  0.0056  0.2932  0.3092
+
+  Welch t-test vs domination (current):
+    repair-big front               delta=+0.0034 (+1.1%)  p=0.6390  ns
+    repair-big hv                  delta=-0.0001 (-0.0%)  p=0.9861  ns
+
+ENTROPY COLLAPSE vs FINAL HV (synthesis, all configs pooled)
+  collapsed    n= 25 mean HV=0.4071 sd=0.0805
+  no collapse  n= 15 mean HV=0.3945 sd=0.0471   p=0.5343
+
+total jobs recorded: 90

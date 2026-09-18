@@ -1,0 +1,16 @@
+{"job_id": 4, "kind": "train", "name": "DOM_FULL", "tag": "DOM_FULL", "tseed": 4, "k": null, "seed": null, "hv": 0.33975651190782463, "NFE": 32011, "valid_frac": 0.7793570959982506, "reward_first": -0.30257812500000003, "reward_last": -0.5231250000000001, "wall": 718.7574415999989}
+{"job_id": 9, "kind": "train", "name": "DOM_DES", "tag": "DOM_DES", "tseed": 4, "k": null, "seed": null, "hv": 0.3357034286976869, "NFE": 32027, "valid_frac": 0.7828082555343928, "reward_first": -0.394203125, "reward_last": -0.186765625, "wall": 924.1729046999826}
+{"job_id": 14, "kind": "train", "name": "HVG_DES", "tag": "HVG_DES", "tseed": 4, "k": null, "seed": null, "hv": 0.33564749035351166, "NFE": 32006, "valid_frac": 0.8196588139723802, "reward_first": -0.18037612999007382, "reward_last": -0.18212499999999998, "wall": 910.6545691999781}
+{"job_id": 19, "kind": "train", "name": "HVB_DES", "tag": "HVB_DES", "tseed": 4, "k": null, "seed": null, "hv": 0.3235382205909735, "NFE": 32018, "valid_frac": 0.7810294209507153, "reward_first": 1.1829288861528218, "reward_last": 1.165716465289062, "wall": 816.6276682999742}
+{"job_id": 1004, "kind": "imga", "name": "random init", "tag": null, "tseed": null, "k": 4, "seed": null, "hv": 0.6701736082696608, "NFE": 16032, "wall": 173.55955199999153}
+{"job_id": 1009, "kind": "imga", "name": "random init", "tag": null, "tseed": null, "k": 9, "seed": null, "hv": 0.7685379531203433, "NFE": 16032, "wall": 193.32949929998722}
+{"job_id": 1014, "kind": "imga", "name": "DOM_FULL", "tag": "DOM_FULL", "tseed": 2, "k": 4, "seed": null, "hv": 0.7439440291005097, "NFE": 16032, "wall": 120.72458360000746}
+{"job_id": 1019, "kind": "imga", "name": "DOM_FULL", "tag": "DOM_FULL", "tseed": 4, "k": 9, "seed": null, "hv": 0.6941600628856418, "NFE": 16032, "wall": 187.91912720000255}
+{"job_id": 1024, "kind": "imga", "name": "DOM_DES", "tag": "DOM_DES", "tseed": 2, "k": 4, "seed": null, "hv": 0.7197556122031541, "NFE": 16032, "wall": 112.93723899999168}
+{"job_id": 1029, "kind": "imga", "name": "DOM_DES", "tag": "DOM_DES", "tseed": 4, "k": 9, "seed": null, "hv": 0.6874873938235841, "NFE": 16032, "wall": 113.98887359999935}
+{"job_id": 1034, "kind": "imga", "name": "HVG_DES", "tag": "HVG_DES", "tseed": 2, "k": 4, "seed": null, "hv": 0.6687698487340641, "NFE": 16032, "wall": 113.17626420001034}
+{"job_id": 1039, "kind": "imga", "name": "HVG_DES", "tag": "HVG_DES", "tseed": 4, "k": 9, "seed": null, "hv": 0.7651669995609156, "NFE": 16032, "wall": 115.57496979998541}
+{"job_id": 1044, "kind": "imga", "name": "HVB_DES", "tag": "HVB_DES", "tseed": 2, "k": 4, "seed": null, "hv": 0.6766003612464626, "NFE": 16032, "wall": 135.1439892000053}
+{"job_id": 1049, "kind": "imga", "name": "HVB_DES", "tag": "HVB_DES", "tseed": 4, "k": 9, "seed": null, "hv": 0.6647606850576008, "NFE": 16032, "wall": 122.79900349999662}
+{"job_id": 2004, "kind": "ga64", "name": "IMGA untrained @64k", "tag": null, "tseed": null, "k": null, "seed": 4, "hv": 0.725683195928409, "NFE": 64032, "wall": 698.3730401000066}
+{"job_id": 2009, "kind": "ga64", "name": "plain GA @64k", "tag": null, "tseed": null, "k": null, "seed": 3, "hv": 0.5313344039369887, "NFE": 64032, "wall": 56.72283770001377}

@@ -1,0 +1,3 @@
+{"job_id": 1, "name": "GA mutate 8 bars (repo default)", "seed": 1, "hv": 0.5268687216214213, "nfe": 64064, "valid_frac": 0.9626311188811189, "secs": 63.881804000004195}
+{"job_id": 9, "name": "GA mutate 2 bars", "seed": 1, "hv": 0.7434819288609589, "nfe": 64064, "valid_frac": 0.9929133366633367, "secs": 59.97336760000326}
+{"job_id": 17, "name": "GA uniform 1 edit", "seed": 1, "hv": 0.7879436679900675, "nfe": 64064, "valid_frac": 0.996284965034965, "secs": 64.79956200000015}
