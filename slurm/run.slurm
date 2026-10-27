@@ -73,7 +73,7 @@ python main.py \
   --update-iterations "$UPDATE_ITERATIONS" \
   --chunk-size "$CHUNK_SIZE" \
   --date-str "$RUN_DATE" \
-  --overlap-constraint False
+  --no-overlap-constraint
 T1=$(date +%s)
 
 echo "################################################################"
