@@ -4,7 +4,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=48G
-#SBATCH --partition=cpu          # Grace: RS is serial NumPy, no GPU needed
+#SBATCH --partition=long          # Grace: RS is serial NumPy, no GPU needed
 #SBATCH --output=logs/rs_%j.out
 #SBATCH --error=logs/rs_%j.err
 #SBATCH --mail-type=END,FAIL
