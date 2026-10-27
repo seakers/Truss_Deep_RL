@@ -6,7 +6,6 @@
 #SBATCH --mem=64G
 #SBATCH --gres=gpu:a100:1
 #SBATCH --partition=gpu
-#SBATCH -A YOUR_ACCOUNT_HERE     # <-- TAMU Grace allocation
 #SBATCH --output=logs/tune_%A_%a.out
 #SBATCH --error=logs/tune_%A_%a.err
 #SBATCH --array=0-17             # = (#LR * #CLIP * #KL * #MB) combos - 1; adjust below

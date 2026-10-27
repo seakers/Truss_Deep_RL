@@ -5,7 +5,6 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=48G
 #SBATCH --partition=cpu          # Grace: RS is serial NumPy, no GPU needed
-#SBATCH -A YOUR_ACCOUNT_HERE     # <-- TAMU Grace allocation (e.g. 1234567890)
 #SBATCH --output=logs/rs_%j.out
 #SBATCH --error=logs/rs_%j.err
 #SBATCH --mail-type=END,FAIL

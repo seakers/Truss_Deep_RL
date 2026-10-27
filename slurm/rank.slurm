@@ -5,7 +5,6 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=2G
 #SBATCH --partition=short
-#SBATCH -A YOUR_ACCOUNT_HERE
 #SBATCH --output=logs/rank_%j.out
 #SBATCH --error=logs/rank_%j.err
 ##############################################################################

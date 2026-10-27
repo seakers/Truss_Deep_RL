@@ -6,7 +6,6 @@
 #SBATCH --mem=96G
 #SBATCH --gres=gpu:a100:1
 #SBATCH --partition=gpu
-#SBATCH -A YOUR_ACCOUNT_HERE
 #SBATCH --output=logs/full_%j.out
 #SBATCH --error=logs/full_%j.err
 #SBATCH --mail-type=END,FAIL
