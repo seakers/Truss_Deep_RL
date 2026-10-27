@@ -72,7 +72,8 @@ python main.py \
   --lambda-gae "$LAMBDA_GAE" \
   --update-iterations "$UPDATE_ITERATIONS" \
   --chunk-size "$CHUNK_SIZE" \
-  --date-str "$RUN_DATE"
+  --date-str "$RUN_DATE" \
+  --overlap-constraint False
 T1=$(date +%s)
 
 echo "################################################################"

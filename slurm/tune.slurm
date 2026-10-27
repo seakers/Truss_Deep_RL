@@ -82,6 +82,7 @@ for METHOD in "${METHODS[@]}"; do
     --target-kl "$KL" \
     --max-values-path "$MAXVALS" \
     --date-str "$RUN_DATE" \
+    --overlap-constraint False
     > "$LOG" 2>&1
   RC=$?
   set -e
