@@ -6,13 +6,12 @@ import gc
 import os
 import matplotlib.pyplot as plt
 from copy import deepcopy
-from pymoo.indicators.hv import HV
 
 from evaluation.truss_problem import TrussProblem
-from utils.hypervolume_utils import is_pareto_efficient
 
 # Reuse directly from existing module [11]
-from optimization.ppo_rand_weights_state import run_epoch, get_models
+from optimization.design_synthesis import run_epoch, get_models
+from utils.pareto import postprocess_run
 
 
 def _estimate_max_values_truss(eval_function, num_samples=500):
@@ -145,8 +144,6 @@ def run_transfer_learning_ppo_state(max_values, params):
     NFE = 0
     all_des, all_obj, all_constraints, all_constraint_vals = [], [], [], []
     all_actor_loss, all_critic_loss, all_avg_obj, all_kl = [], [], [], []
-    ref_point = np.ones(num_objectives)
-    hv_ind = HV(ref_point=ref_point)
 
     for epoch in range(finetune_epochs):
         if epoch % 10 == 9:
@@ -170,40 +167,6 @@ def run_transfer_learning_ppo_state(max_values, params):
     # ============================================================
     # Post-processing — identical to ppo_rand_weights_state [11]
     # ============================================================
-    all_des = np.array(all_des)
-    all_obj = np.array(all_obj)
-    all_constraints = np.array(all_constraints)
-    all_constraint_vals = np.array(all_constraint_vals)
-
-    ref_values = max_objectives * ref_point
-    ref_values[~min_mask[:num_objectives]] = 0.0
-    all_obj[all_constraints] = ref_values
-    print(f"Valid designs: {np.sum(~all_constraints)}")
-
-    norm_obj = all_obj / max_objectives
-    hv_obj = deepcopy(norm_obj)
-    for i in range(num_objectives):
-        if objective_min_max[i].lower() == 'max':
-            hv_obj[:, i] = 1 - norm_obj[:, i]
-
-    pareto_front_des, pareto_front_obj, hypervolumes = [], [], []
-    for obj_idx in range(NFE):
-        if not all_constraints[obj_idx] or len(hypervolumes) == 0:
-            pfront_obj = hv_obj[:obj_idx + 1]
-            pfront_des = all_des[:obj_idx + 1]
-            pfront_mask = is_pareto_efficient(pfront_obj, return_mask=True)
-            if pfront_mask[-1]:
-                pareto_front_obj.append(pfront_obj[pfront_mask])
-                pareto_front_des.append(pfront_des[pfront_mask])
-                hypervolumes.append(hv_ind(pfront_obj[pfront_mask]))
-            else:
-                hypervolumes.append(hypervolumes[-1] if hypervolumes else 0)
-                pareto_front_obj.append(pareto_front_obj[-1] if pareto_front_obj else [])
-                pareto_front_des.append(pareto_front_des[-1] if pareto_front_des else [])
-        else:
-            hypervolumes.append(hypervolumes[-1] if hypervolumes else 0)
-            pareto_front_obj.append(pareto_front_obj[-1] if pareto_front_obj else [])
-            pareto_front_des.append(pareto_front_des[-1] if pareto_front_des else [])
 
     # Save fine-tuned models
     torch.save(actor.state_dict(), f'results/{date_str}/actor_transfer_state_finetuned.pth')
@@ -218,4 +181,7 @@ def run_transfer_learning_ppo_state(max_values, params):
     plt.savefig(f'results/{date_str}/transfer_state_training.png')
     plt.close()
 
-    return all_des, all_obj, pareto_front_des, pareto_front_obj, hypervolumes, NFE
+    return postprocess_run(
+        all_des, all_obj, all_constraints, all_constraint_vals,
+        objective_min_max, max_values,
+    )

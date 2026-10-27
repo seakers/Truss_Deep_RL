@@ -1,133 +1,190 @@
-import time
+"""Custom NSGA-II GA for the discrete 72-bar TrussProblem, using utils.pareto
+(no pymoo/pygad). Replaces the previous PyGAD implementation [3].
+
+Core NSGA-II operators (constrained non-dominated sort, crowding distance,
+tournament, single-point-style crossover, random mutation) are self-contained.
+The truss interface is static: evaluate(design) takes one arg and returns
+(objectives, is_constrained, constraint_vals) [10]; no reset()/filter_des_space.
+Output format matches the RL methods via postprocess_run [2][3].
+"""
 import numpy as np
-import pygad
-import matplotlib.pyplot as plt
-from copy import deepcopy
-from pymoo.indicators.hv import HV
 
 from evaluation.truss_problem import TrussProblem
-from utils.hypervolume_utils import is_pareto_efficient
+from utils.pareto import postprocess_run
+
+
+# ---- NSGA-II operators ----
+def _dominates(a, b, min_mask):
+    better = np.where(min_mask, a < b, a > b)
+    worse = np.where(min_mask, a > b, a < b)
+    return np.any(better) and not np.any(worse)
+
+
+def _constrained_dominates(a, b, viol_a, viol_b, min_mask, tol=1e-9):
+    """Deb constrained-domination: feasibility first, then Pareto dominance."""
+    a_feasible = viol_a <= tol
+    b_feasible = viol_b <= tol
+    if a_feasible and not b_feasible:
+        return True
+    if b_feasible and not a_feasible:
+        return False
+    if not a_feasible and not b_feasible:
+        return viol_a < viol_b
+    return _dominates(a, b, min_mask)
+
+
+def _fast_nondominated_sort(objs, min_mask, viol):
+    n = len(objs)
+    S = [[] for _ in range(n)]
+    ndom = np.zeros(n, dtype=int)
+    fronts = [[]]
+    for p in range(n):
+        for q in range(n):
+            if p == q:
+                continue
+            if _constrained_dominates(objs[p], objs[q], viol[p], viol[q], min_mask):
+                S[p].append(q)
+            elif _constrained_dominates(objs[q], objs[p], viol[q], viol[p], min_mask):
+                ndom[p] += 1
+        if ndom[p] == 0:
+            fronts[0].append(p)
+    i = 0
+    while fronts[i]:
+        nxt = []
+        for p in fronts[i]:
+            for q in S[p]:
+                ndom[q] -= 1
+                if ndom[q] == 0:
+                    nxt.append(q)
+        i += 1
+        fronts.append(nxt)
+    return fronts[:-1]
+
+
+def _crowding_distance(objs):
+    n, m = objs.shape
+    dist = np.zeros(n)
+    for k in range(m):
+        order = np.argsort(objs[:, k])
+        dist[order[0]] = dist[order[-1]] = np.inf
+        span = objs[order[-1], k] - objs[order[0], k]
+        if span == 0:
+            continue
+        for i in range(1, n - 1):
+            dist[order[i]] += (objs[order[i + 1], k] - objs[order[i - 1], k]) / span
+    return dist
+
+
+def _random_gene(var, rng):
+    """Truss genes are all discrete ('Area' or 'Sel') [10]."""
+    if var["type"] == "continuous":
+        return float(rng.uniform(var["range"][0], var["range"][1]))
+    return int(rng.choice(np.array(var["range"])))
+
+
+def _crossover(p1, p2, rng):
+    mask = rng.random(len(p1)) < 0.5
+    return [p1[i] if mask[i] else p2[i] for i in range(len(p1))]
+
+
+def _mutate(genes, gene_space, rng, rate=0.1):
+    child = list(genes)
+    for i, var in enumerate(gene_space):
+        if rng.random() < rate:
+            child[i] = _random_gene(var, rng)
+    return child
+
 
 def run_genetic_algorithm(max_values, params):
-    # print("\n\nRunning Genetic Algorithm...\n\n")
-    
+    print("\n\nRunning Genetic Algorithm (custom NSGA-II)...\n\n")
+    rng = np.random.default_rng()
+
     pop_size = params['mini_batch_size']
     n_gen = params['num_epochs']
-    
-    setup_problem = TrussProblem()
 
-    num_genes = setup_problem.n_elements
-    gene_space = [ range(len(setup_problem.area_map)) for _ in range(num_genes) ]
-    
-    min_mask = np.array([True, True, False, True, True])
-    
-    all_des = []
-    all_obj = []
-    all_constraints = []
-    all_constraint_vals = []
-    NFE = 0
+    setup_problem = TrussProblem(overlap_constraint=params.get('overlap_constraint', False))
+    template_des_space = setup_problem._design_space_template
+
     num_objectives = setup_problem.num_objectives
-    max_objectives = max_values[:num_objectives]
     objective_min_max = setup_problem.objective_min_max
-    ref_point = np.ones(num_objectives)
-    hv_ind = HV(ref_point=ref_point)
+    # min_mask over objectives only (3) for domination; constraints handled via viol
+    min_mask = np.array([mm.lower() == 'min' for mm in objective_min_max[:num_objectives]])
 
-    def fitness_func(ga_instance, solution, solution_idx):
-        discrete_solution = [int(x) for x in solution]
-        
-        # 1. Evaluate
+    all_des, all_obj, all_constraints, all_constraint_vals = [], [], [], []
+    NFE = 0
+
+    # ---- evaluation (truss static interface: evaluate(design), one arg) [10] ----
+    def evaluate(raw_solution):
+        nonlocal NFE
+        discrete_solution = [int(x) for x in raw_solution]
         obj_values, is_constrained, constraint_vals = setup_problem.evaluate(discrete_solution)
-        
-        nonlocal all_des, all_obj, all_constraints, NFE, all_constraint_vals
+        NFE += 1
+
         all_des.append(discrete_solution)
-        all_obj.append(obj_values)
-        # eval_function_temp.print_design()
+        all_obj.append(obj_values)                 # raw objectives -> HV/Pareto
         all_constraints.append(is_constrained)
         all_constraint_vals.append(constraint_vals)
-        NFE += 1
-        
-        if is_constrained:
-            obj_arr = -np.array(np.append(max_objectives,constraint_vals), dtype=float) # for minimization objectives
-            obj_arr[~min_mask] = 0.0 # For maximization objectives, zero fitness
-            obj_arr[-2:] = constraint_vals  # Append constraint values as is
-            obj_arr[-2:][min_mask[-2:]] = -obj_arr[-2:][min_mask[-2:]]  # Negate if minimization
-            return obj_arr
-        else:
-            # Return negative objectives for maximization (PyGAD maximizes fitness)
-            obj_arr = np.array(obj_values + constraint_vals, dtype=float)
-            obj_arr[min_mask] = -obj_arr[min_mask]
-            return obj_arr
 
-    # Initialize GA
-    ga_instance = pygad.GA(
-        num_generations=n_gen,
-        num_parents_mating=int(pop_size/2),
-        fitness_func=fitness_func,
-        sol_per_pop=pop_size,
-        num_genes=num_genes,
-        gene_space=gene_space,
-        parent_selection_type="sss",
-        crossover_type="single_point",
-        mutation_type="random",
-        mutation_percent_genes=10,
-        keep_elitism=0,
-        keep_parents=0,
-        save_solutions=False,
-    )
+        obj = np.array(obj_values, dtype=float)
+        viol = float(np.sum(constraint_vals)) if is_constrained else 0.0
+        return discrete_solution, obj, viol
 
-    ga_instance.run()
+    # ---- init population ----
+    population = [[_random_gene(v, rng) for v in template_des_space] for _ in range(pop_size)]
+    pop_repaired, pop_obj, pop_viol = [], [], []
+    for genes in population:
+        d, obj, viol = evaluate(genes)
+        pop_repaired.append(d); pop_obj.append(obj); pop_viol.append(viol)
+    population, pop_obj, pop_viol = pop_repaired, np.array(pop_obj), np.array(pop_viol)
 
-    # Post-Processing
-    all_des = np.array(all_des)
-    all_obj = np.array(all_obj)
-    all_constraints = np.array(all_constraints)
-    all_constraint_vals = np.array(all_constraint_vals)
+    # ---- generations ----
+    for gen in range(n_gen):
+        if gen % max(1, n_gen // 10) == 0:
+            print(f"GA generation {gen}/{n_gen}")
 
-    ref_values = max_objectives * ref_point # max point for min objectives, zero for max objectives
-    ref_values[~min_mask[:num_objectives]] = 0.0
-    all_obj[all_constraints] = ref_values
-    print(f"Number of valid designs (False in all_constraints): {np.sum(all_constraints == False)}")
-    norm_obj = all_obj / max_objectives
-    hv_obj = deepcopy(norm_obj)
-    for i in range(num_objectives):
-        if objective_min_max[i].lower() == 'max':
-            hv_obj[:,i] = 1 - norm_obj[:,i]
+        fronts = _fast_nondominated_sort(pop_obj, min_mask, pop_viol)
+        rank = np.zeros(len(population), dtype=int)
+        for r, front in enumerate(fronts):
+            for idx in front:
+                rank[idx] = r
 
-    pareto_front_des = []
-    pareto_front_obj = []
-    hypervolumes = []
+        def tournament():
+            i, j = rng.integers(0, len(population), size=2)
+            return i if rank[i] <= rank[j] else j
 
-    pareto_time = 0
-    hv_time = 0
+        offspring = []
+        for _ in range(pop_size):
+            p1, p2 = population[tournament()], population[tournament()]
+            offspring.append(_mutate(_crossover(p1, p2, rng), template_des_space, rng))
 
-    total_time_start = time.time()
-    for obj in range(NFE):
-        if all_constraints[obj] == False or len(hypervolumes) == 0: # check this to save computational time
-            pfront_obj = hv_obj[:obj+1]
-            pfront_des = all_des[:obj+1]
-            p_start_time = time.time()
-            pfront_mask = is_pareto_efficient(pfront_obj, return_mask=True)
-            p_end_time = time.time()
-            pareto_time += (p_end_time - p_start_time)
-            if pfront_mask[-1]:
-                pareto_front_obj.append(pfront_obj[pfront_mask])
-                pareto_front_des.append(pfront_des[pfront_mask])
-                hv_start_time = time.time()
-                hypervolumes.append(hv_ind(pfront_obj[pfront_mask]))
-                hv_end_time = time.time()
-                hv_time += (hv_end_time - hv_start_time)
+        off_repaired, off_obj, off_viol = [], [], []
+        for genes in offspring:
+            d, obj, viol = evaluate(genes)
+            off_repaired.append(d); off_obj.append(obj); off_viol.append(viol)
+
+        combined = population + off_repaired
+        combined_obj = np.vstack([pop_obj, np.array(off_obj)])
+        combined_viol = np.concatenate([pop_viol, np.array(off_viol)])
+        c_fronts = _fast_nondominated_sort(combined_obj, min_mask, combined_viol)
+
+        new_pop, new_obj, new_viol = [], [], []
+        for front in c_fronts:
+            if len(new_pop) + len(front) <= pop_size:
+                for idx in front:
+                    new_pop.append(combined[idx])
+                    new_obj.append(combined_obj[idx])
+                    new_viol.append(combined_viol[idx])
             else:
-                hypervolumes.append(hypervolumes[-1])
-                pareto_front_obj.append(pareto_front_obj[-1])
-                pareto_front_des.append(pareto_front_des[-1])
-        else:
-            hypervolumes.append(hypervolumes[-1])
-            pareto_front_obj.append(pareto_front_obj[-1])
-            pareto_front_des.append(pareto_front_des[-1])
-    total_time_end = time.time()
-    print(f"Total time for Pareto front updates and hypervolume calculations: {total_time_end - total_time_start:.4f} seconds")
+                cd = _crowding_distance(combined_obj[front])
+                for k in np.argsort(-cd)[: pop_size - len(new_pop)]:
+                    new_pop.append(combined[front[k]])
+                    new_obj.append(combined_obj[front[k]])
+                    new_viol.append(combined_viol[front[k]])
+                break
+        population, pop_obj, pop_viol = new_pop, np.array(new_obj), np.array(new_viol)
 
-    print(f"Time for Pareto front updates: {pareto_time:.4f} seconds")
-    print(f"Time for hypervolume calculations: {hv_time:.4f} seconds")
-
-    return all_des, all_obj, pareto_front_des, pareto_front_obj, hypervolumes, NFE
+    # ---- post-processing (same helper/format as RL methods) [2][3] ----
+    return postprocess_run(
+        all_des, all_obj, all_constraints, all_constraint_vals,
+        objective_min_max, max_values,
+    )

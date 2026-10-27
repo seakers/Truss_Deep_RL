@@ -7,20 +7,26 @@ from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.cm as cm
 import matplotlib.colors as colors
 
+
+TOP_NODES = [16, 17, 18, 19]
+
 class TrussProblem:
-    def __init__(self, load_factor=1.0):
+    def __init__(self, load_factor=1.0, overlap_constraint=None, load_node=16): #set overlap to none to force an error when not specified
         """
-        Discrete 72-Bar Truss Benchmark
-        Action Space: 72 discrete integers [0, 1, 2, 3]
+        Discrete 72-Bar Truss Benchmark.
+
+        load_node: node id receiving the downward point load. Must be one of
+                   TOP_NODES. Default 16 preserves the original benchmark.
         """
+        if overlap_constraint is None:
+            raise ValueError("TrussProblem requires overlap_constraint to be specified (True/False).")
+        
         self.n_elements = 72
         self.load_factor = load_factor
+        self.load_node = load_node          # NEW
         self.n_nodes = 20
-        
-        # --- Discrete Options (Area in in^2) ---
-        # self.area_map = {
-        #     0: 1e-6, 1: 0.1, 2: 1.0, 3: 3.0
-        # }
+        self.overlap_constraint = overlap_constraint
+
         self.area_map = np.linspace(0, 3.0, 50)
         self.area_map[0] = 1e-6  # To avoid zero area
         
@@ -37,6 +43,17 @@ class TrussProblem:
         
         self.nodes, self.elements, self.fixed_nodes = self._generate_geometry()
         self.forces = self._generate_loads()
+
+        self.overlap_pairs = self._find_overlap_pairs() if overlap_constraint else []
+        self.design_space, self._gene_layout = self._build_design_space()
+        self._design_space_template = self.design_space        # physical genes (len varies by mode)
+
+        # unique variable types: one 'Area' always; add 'Sel' only when pairs exist
+        n_areas = len(self.area_map)
+        self.unique_design_space = [{'type': 'discrete', 'range': list(range(n_areas)), 'name': 'Area'}]
+        if self.overlap_pairs:
+            self.unique_design_space.insert(0, {'type': 'discrete', 'range': [0, 1], 'name': 'Sel'})
+
         
     def _generate_geometry(self):
         nodes = []
@@ -60,12 +77,84 @@ class TrussProblem:
             elements.extend([[top, top+2], [top+1, top+3]])
         return nodes, np.array(elements), [0, 1, 2, 3]
 
+
     def _generate_loads(self):
         forces = np.zeros(self.n_nodes * 3)
-        forces[16 * 3 + 2] = -5000.0 * self.load_factor
+        forces[self.load_node * 3 + 2] = -5000.0 * self.load_factor   # was 16*3+2
         return forces
 
-    def solve(self, discrete_actions):
+
+    def _find_overlap_pairs(self):
+        """Pairs of elements that cross: no shared node, segments intersect
+        at an interior point of both. Fixed geometry -> computed once."""
+        pairs = []
+        n = len(self.elements)
+        for i in range(n):
+            a, b = self.nodes[self.elements[i]]
+            for j in range(i + 1, n):
+                if set(self.elements[i]) & set(self.elements[j]):
+                    continue
+                c, d = self.nodes[self.elements[j]]
+                if self._segments_cross(a, b, c, d):
+                    pairs.append((i, j))
+        return pairs
+
+
+    def _segments_cross(self, p1, p2, p3, p4, tol=1e-6):
+        """True if segment p1p2 and segment p3p4 intersect at an interior point of both."""
+        d1, d2 = p2 - p1, p4 - p3
+        r = p3 - p1
+        A = np.column_stack([d1, -d2])
+        ts, _, rank, _ = np.linalg.lstsq(A, r, rcond=None)
+        if rank < 2:
+            return False  # parallel / degenerate
+        t, s = ts
+        gap = np.linalg.norm((p1 + t * d1) - (p3 + s * d2))
+        return (tol < t < 1 - tol) and (tol < s < 1 - tol) and gap < tol
+
+
+    def _build_design_space(self):
+        """design_space dicts + a layout to decode genes -> length-72 area indices.
+        layout entries: ('area', elem) or ('pair', elem_i, elem_j)."""
+        n_areas = len(self.area_map)
+        if not self.overlap_constraint:
+            ds = [{'type': 'discrete', 'range': list(range(n_areas)),
+                'name': 'Area'}] * self.n_elements
+            return ds, [('area', e) for e in range(self.n_elements)]
+
+        paired = {e for pair in self.overlap_pairs for e in pair}
+        ds, layout = [], []
+        for (i, j) in self.overlap_pairs:
+            ds.append({'type': 'discrete', 'range': [0, 1], 'name': 'Sel'})
+            ds.append({'type': 'discrete', 'range': list(range(n_areas)),
+                    'name': 'Area'})
+            layout.append(('pair', i, j))
+        for e in range(self.n_elements):
+            if e not in paired:
+                ds.append({'type': 'discrete', 'range': list(range(n_areas)),
+                        'name': 'Area'})
+                layout.append(('area', e))
+        return ds, layout
+
+
+    def _decode(self, design):
+        """Map a design-space gene vector to length-72 area-map indices.
+        Deselected member of a pair stays at index 0 (~zero area)."""
+        area_idx = np.zeros(self.n_elements, dtype=int)
+        g = 0
+        for entry in self._gene_layout:
+            if entry[0] == 'area':
+                _, e = entry
+                area_idx[e] = int(design[g]); g += 1
+            else:
+                _, i, j = entry
+                selector = int(design[g]); g += 1
+                chosen = i if selector == 0 else j
+                area_idx[chosen] = int(design[g]); g += 1
+        return area_idx
+
+    def solve(self, design):
+        discrete_actions = self._decode(design)
         areas = np.array([self.area_map[a] for a in discrete_actions])
         n_dof = self.n_nodes * 3
         K_global = np.zeros((n_dof, n_dof))
@@ -147,97 +236,7 @@ class TrussProblem:
         
         return objectives, is_constrained, constraints
 
-    def render(self, discrete_actions, save_name, deformation_scale=100.0, show_constraints=True):
-        """
-        Visualizes the truss structure.
-        """
-        res = self.solve(discrete_actions)
-        
-        # Helper to re-run simple static solve for plotting vectors
-        # (Copying the solve logic here strictly for visualization data extraction)
-        areas = np.array([self.area_map[a] for a in discrete_actions])
-        n_dof = self.n_nodes * 3
-        K_global = np.zeros((n_dof, n_dof))
-        for idx, (n1, n2) in enumerate(self.elements):
-            p1, p2 = self.nodes[n1], self.nodes[n2]
-            L = np.linalg.norm(p2 - p1)
-            cx, cy, cz = (p2 - p1) / L
-            A = areas[idx]
-            k_val = (self.E * A / L)
-            T = np.array([[cx, cy, cz, 0, 0, 0], [0, 0, 0, cx, cy, cz]])
-            k_local = np.array([[1, -1], [-1, 1]]) * k_val
-            k_elem = T.T @ k_local @ T
-            indices = [n1*3, n1*3+1, n1*3+2, n2*3, n2*3+1, n2*3+2]
-            for r in range(6):
-                for c in range(6):
-                    K_global[indices[r], indices[c]] += k_elem[r, c]
-        
-        fixed_dofs = []
-        for n in self.fixed_nodes: fixed_dofs.extend([n*3, n*3+1, n*3+2])
-        free_dofs = [i for i in range(n_dof) if i not in fixed_dofs]
-        
-        if not res['valid']:
-             print(f"Cannot visualize {save_name}: Structure Invalid.")
-             return
-
-        K_reduced = K_global[np.ix_(free_dofs, free_dofs)]
-        F_reduced = self.forces[free_dofs]
-        u_reduced = spsolve(coo_matrix(K_reduced), F_reduced)
-        u_full = np.zeros(n_dof)
-        u_full[free_dofs] = u_reduced
-        
-        element_stresses = []
-        for idx, (n1, n2) in enumerate(self.elements):
-            p1, p2 = self.nodes[n1], self.nodes[n2]
-            L = np.linalg.norm(p2 - p1)
-            u_el = np.concatenate([u_full[n1*3:n1*3+3], u_full[n2*3:n2*3+3]])
-            vec = (p2 - p1) / L
-            delta_l = np.dot(u_el[3:] - u_el[:3], vec)
-            stress = (self.E * delta_l) / L
-            element_stresses.append(stress)
-        element_stresses = np.array(element_stresses)
-
-        # Plotting
-        fig = plt.figure(figsize=(10, 8))
-        ax = fig.add_subplot(111, projection='3d')
-        cmap = plt.get_cmap('jet')
-        norm = colors.Normalize(vmin=0, vmax=self.stress_limit)
-        
-        for idx, (n1, n2) in enumerate(self.elements):
-            action = discrete_actions[idx]
-            if action == 0: continue 
-            
-            p1, p2 = self.nodes[n1], self.nodes[n2]
-            d1 = u_full[n1*3:n1*3+3] * deformation_scale
-            d2 = u_full[n2*3:n2*3+3] * deformation_scale
-            coord_1 = p1 + d1
-            coord_2 = p2 + d2
-            
-            stress_val = abs(element_stresses[idx])
-            color = cmap(norm(stress_val))
-            linewidth = action * 0.1 
-            ax.plot([coord_1[0], coord_2[0]], [coord_1[1], coord_2[1]], [coord_1[2], coord_2[2]], 
-                    color=color, linewidth=linewidth, alpha=0.9)
-            
-        deformed_nodes = self.nodes + u_full.reshape(-1, 3) * deformation_scale
-        ax.scatter(deformed_nodes[:,0], deformed_nodes[:,1], deformed_nodes[:,2], c='black', s=20)
-
-        ax.set_title(f'{save_name}\nMass: {res["mass"]:.1f} | Freq: {res["frequency"]:.1f} Hz')
-        
-        # Scaling
-        max_range = np.array([self.nodes[:,0].max()-self.nodes[:,0].min(), 
-                              self.nodes[:,1].max()-self.nodes[:,1].min(), 
-                              self.nodes[:,2].max()-self.nodes[:,2].min()]).max() / 2.0
-        mid_x = (self.nodes[:,0].max()+self.nodes[:,0].min()) * 0.5
-        mid_y = (self.nodes[:,1].max()+self.nodes[:,1].min()) * 0.5
-        mid_z = (self.nodes[:,2].max()+self.nodes[:,2].min()) * 0.5
-        ax.set_xlim(mid_x - max_range, mid_x + max_range)
-        ax.set_ylim(mid_y - max_range, mid_y + max_range)
-        ax.set_zlim(mid_z - max_range, mid_z + max_range)
-
-        m = cm.ScalarMappable(norm=norm, cmap=cmap)
-        m.set_array([])
-        plt.colorbar(m, ax=ax, shrink=0.5, pad=0.1, label='Stress (psi)')
-        
-        plt.savefig(save_name + ".png")
-        plt.close()
+    def render(self, design, save_name, deformation_scale=100.0, show_constraints=True):
+        """Visualizes the truss structure (HTML/Plotly)."""
+        from utils.visualization import render_truss
+        render_truss(self, design, save_name, deformation_scale, show_constraints)

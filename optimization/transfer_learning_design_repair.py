@@ -6,17 +6,16 @@ import gc
 import os
 import matplotlib.pyplot as plt
 from copy import deepcopy
-from pymoo.indicators.hv import HV
 
 from evaluation.truss_problem import TrussProblem
-from utils.hypervolume_utils import is_pareto_efficient
 
 # Reuse from existing truss design_repair [3]
 from optimization.design_repair import (
     get_models, run_repair_epoch, generate_initial_designs,
-    sample_next_batch, calculate_pareto_progress, plot_training_results
+    sample_next_batch, plot_training_results
 )
-from optimization.transfer_learning_ppo_state import _estimate_max_values_truss
+from optimization.transfer_learning_design_synthesis import _estimate_max_values_truss
+from utils.pareto import postprocess_run
 
 
 def run_transfer_learning_design_repair(max_values, params):
@@ -130,9 +129,6 @@ def run_transfer_learning_design_repair(max_values, params):
     all_des, all_obj, all_constraints, all_constraint_vals = [], [], [], []
     all_actor_loss, all_critic_loss, all_avg_reward, all_kl = [], [], [], []
 
-    ref_point = np.ones(num_objectives)
-    hv_ind = HV(ref_point=ref_point)
-
     while NFE < finetune_nfe_budget:
         epoch = NFE // mini_batch_size
         if epoch % 10 == 9:
@@ -171,28 +167,13 @@ def run_transfer_learning_design_repair(max_values, params):
     # ============================================================
     # Post-processing — identical to design_repair [3]
     # ============================================================
-    all_des = np.array(all_des)
-    all_obj = np.array(all_obj)
-    all_constraints = np.array(all_constraints)
-
-    ref_values = max_objectives * ref_point
-    ref_values[~min_mask[:num_objectives]] = 0.0
-    all_obj[all_constraints] = ref_values
-    print(f"Valid designs: {np.sum(~all_constraints)}")
-
-    norm_obj = all_obj / max_objectives
-    hv_obj = deepcopy(norm_obj)
-    for i in range(num_objectives):
-        if objective_min_max[i].lower() == 'max':
-            hv_obj[:, i] = 1 - norm_obj[:, i]
-
-    pareto_front_des, pareto_front_obj, hypervolumes = calculate_pareto_progress(
-        all_des, all_obj, all_constraints, hv_obj, hv_ind, NFE
-    )
 
     # Save fine-tuned models
     torch.save(actor.state_dict(), f'results/{date_str}/actor_transfer_repair_finetuned.pth')
     torch.save(critic.state_dict(), f'results/{date_str}/critic_transfer_repair_finetuned.pth')
     plot_training_results(all_actor_loss, all_critic_loss, all_kl, all_avg_reward, params)
 
-    return all_des, all_obj, pareto_front_des, pareto_front_obj, hypervolumes, NFE
+    return postprocess_run(
+        all_des, all_obj, all_constraints, all_constraint_vals,
+        objective_min_max, max_values,
+    )

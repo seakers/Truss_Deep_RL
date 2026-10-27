@@ -2,12 +2,11 @@ import numpy as np
 import torch
 import scipy.signal
 import matplotlib.pyplot as plt
-from pymoo.indicators.hv import HV
 from copy import deepcopy
 
 from evaluation.truss_problem import TrussProblem
-from utils.hypervolume_utils import is_pareto_efficient
-from optimization.transformer_design_repair import Actor, Critic
+from optimization.ppo_architectures import RepairActor, RepairCritic
+from utils.pareto import postprocess_run, is_pareto_efficient
 
 def discounted_cumulative_sums(x, discount):
     return scipy.signal.lfilter([1], [1, float(-discount)], x[::-1], axis=0)[::-1]
@@ -22,7 +21,12 @@ def run_design_repair_ppo(max_values, params, run_idx=0, best_hv_so_far=-np.inf)
     epochs = params['num_epochs']
     mini_batch_size = params['mini_batch_size']
     
-    eval_function = TrussProblem()
+    eval_function = TrussProblem(
+        overlap_constraint=params['overlap_constraint'],
+        load_factor=params.get('load_factor', 1.0),     # NEW
+        load_node=params.get('load_node', 16),          # NEW
+    )
+
     num_objectives = eval_function.num_objectives
     objective_min_max = eval_function.objective_min_max
     num_actions = eval_function.n_elements
@@ -31,11 +35,9 @@ def run_design_repair_ppo(max_values, params, run_idx=0, best_hv_so_far=-np.inf)
     max_objectives = max_values[:num_objectives]
     min_mask = np.array([om.lower() == 'min' for om in objective_min_max])
     
-    ref_point = np.ones(num_objectives)
-    hv_ind = HV(ref_point=ref_point)
-
-    num_total_objs = len(max_values)    
-    actor, critic = get_models(device, params, num_total_objs)
+    actor, critic = get_models(device, params, eval_function)
+    ctx = params.get('context_vector')                  # NEW
+    actor.set_context(ctx); critic.set_context(ctx)     # NEW — no-op if ctx is None [4]
     
     NFE = 0
     all_des, all_obj, all_constraints, all_constraint_vals = [], [], [], []
@@ -90,27 +92,12 @@ def run_design_repair_ppo(max_values, params, run_idx=0, best_hv_so_far=-np.inf)
         
         # Sample new initial designs for next epoch (mix of random and previous designs)
     
-    # Post-process results (similar to your existing code)
-    all_des = np.array(all_des)
-    all_obj = np.array(all_obj)
-    all_constraints = np.array(all_constraints)
-    
-    ref_values = max_objectives * ref_point
-    ref_values[~min_mask[:num_objectives]] = 0.0
-    all_obj[all_constraints] = ref_values
-    
-    print(f"Number of valid designs: {np.sum(all_constraints == False)}")
-    
-    norm_obj = all_obj / max_objectives
-    hv_obj = deepcopy(norm_obj)
-    for i in range(num_objectives):
-        if objective_min_max[i].lower() == 'max':
-            hv_obj[:,i] = 1 - norm_obj[:,i]
-    
-    # Calculate Pareto front and hypervolume over time
-    pareto_front_des, pareto_front_obj, hypervolumes = calculate_pareto_progress(
-        all_des, all_obj, all_constraints, hv_obj, hv_ind, NFE
+    post_process_package = postprocess_run(
+        all_des, all_obj, all_constraints, all_constraint_vals,
+        objective_min_max, max_values,
     )
+
+    all_des, all_obj, pareto_front_des, pareto_front_obj, hypervolumes, NFE = post_process_package
     
     # ── Best-HV model saving ──────────────────────────────────────────────────
     run_best_hv = hypervolumes[-1] if hypervolumes else 0.0
@@ -129,33 +116,33 @@ def run_design_repair_ppo(max_values, params, run_idx=0, best_hv_so_far=-np.inf)
     return all_des, all_obj, pareto_front_des, pareto_front_obj, hypervolumes, NFE, run_best_hv
 
 
-def get_models(device, params, num_total_objs):
-    problem = TrussProblem()
-    num_actions = problem.n_elements
-    action_length = len(problem.area_map)
 
-    actor = Actor(device=device, params=params, num_variables=num_actions,
-                  action_length=action_length, num_objectives=num_total_objs)
-
-    # CHANGE: remove the spurious +2. num_total_objs is already 5 (3 obj + 2 cv)
-    # so input_dim = 72 + 5 = 77, matching new_design + new_obj + new_constraint_vals
-    critic = Critic(device=device, params=params, num_objectives=num_total_objs,
-                    input_dim=num_actions + num_total_objs)  # 72 + 5 = 77
-
-    actor.to(device)
-    critic.to(device)
-
-    # Dummy tensors must also match the corrected 77 dims
-    input_dummy = torch.zeros((1, num_actions + num_total_objs), dtype=torch.float32).to(device)
-    actor(input_dummy)
-    critic(input_dummy)  # Same dummy works for both now
+def get_models(device, params, problem, load_models=None):
+    gene_space = problem.design_space
+    unique_des_space = problem.unique_design_space
+    actor = RepairActor(device, params, gene_space, unique_des_space,
+                        problem.num_objectives).to(device)
+    critic = RepairCritic(device, params, len(gene_space)).to(device)
 
     if params['model_folder'] is not None:
         actor.load_state_dict(torch.load(f"{params['model_folder']}/actor_repair_model.pth"))
         critic.load_state_dict(torch.load(f"{params['model_folder']}/critic_repair_model.pth"))
         print("Loaded pre-trained models.")
 
+    if load_models is not None:
+        actor.load_state_dict(torch.load(f"{load_models}/actor_repair_model.pth"))
+        critic.load_state_dict(torch.load(f"{load_models}/critic_repair_model.pth"))
+        print("Loaded pre-trained models from specified path.")
+        
     return actor, critic
+
+
+def encode_design(design, gene_space):
+    enc = []
+    for i, val in enumerate(design):
+        opts = list(gene_space[i]['range'])
+        enc.append(opts.index(val) / max(1, len(opts) - 1))
+    return enc
 
 
 def run_repair_epoch(actor, critic, all_des, all_obj, all_constraints, designs, objs, eval_function, mini_batch_size, 
@@ -166,6 +153,7 @@ def run_repair_epoch(actor, critic, all_des, all_obj, all_constraints, designs, 
     num_objectives = len(max_objectives)
     num_actions = eval_function.n_elements
     action_range = len(eval_function.area_map)
+    gene_space = eval_function.design_space
     
     # Storage for trajectories
     batch_observations = [[] for _ in range(mini_batch_size)]
@@ -173,6 +161,8 @@ def run_repair_epoch(actor, critic, all_des, all_obj, all_constraints, designs, 
     batch_logprobs = [[] for _ in range(mini_batch_size)]
     batch_rewards = [[] for _ in range(mini_batch_size)]
     batch_designs = [[] for _ in range(mini_batch_size)]
+    batch_infos = [[] for _ in range(mini_batch_size)]
+    batch_states = [[] for _ in range(mini_batch_size)]
     
     epoch_des = []
     epoch_obj = []
@@ -187,16 +177,12 @@ def run_repair_epoch(actor, critic, all_des, all_obj, all_constraints, designs, 
         while not stop_token:
             current_obj = objs[idx]
             
-            # Sample actions from actor
-            var_log_prob, var_idx, value_log_prob, value_idx, stop_log_prob, stop_decision = actor.sample_action(
-                torch.tensor(current_design, dtype=torch.float32).to(device)
-            )
-            
-            # Create new design
-            new_design = current_design.copy()
-            new_design[var_idx.item()] = value_idx.item()
-            
-            # Evaluate new design
+            state = torch.tensor(encode_design(current_design, gene_space),
+                                dtype=torch.float32, device=device)
+            var_idx, new_value, stop_decision, log_prob, info = actor.sample_action(state)
+
+            new_design = list(current_design)
+            new_design[var_idx] = new_value
             new_obj, new_constraints, new_constraint_vals = eval_function.evaluate(new_design)
             NFE += 1
 
@@ -217,8 +203,9 @@ def run_repair_epoch(actor, critic, all_des, all_obj, all_constraints, designs, 
             )
             
             # Store trajectory
-            batch_actions[idx].append([var_idx.item(), value_idx.item(), stop_decision.item()])
-            batch_logprobs[idx].append([var_log_prob.item(), value_log_prob.item(), stop_log_prob.item()])
+            batch_states[idx].append(state.cpu().numpy())
+            batch_infos[idx].append(info)
+            batch_logprobs[idx].append(float(log_prob.item()))
             batch_rewards[idx].append(reward)
             batch_designs[idx].append(new_design)
             
@@ -227,61 +214,42 @@ def run_repair_epoch(actor, critic, all_des, all_obj, all_constraints, designs, 
             batch_observations[idx].append(new_obs)
                     
             # Check if stop decision was made
-            if stop_decision.item() == 1:  # Stop decision is 1 (stop)
+            if int(stop_decision) == 1:  # Stop decision is 1 (stop)
                 stop_token = True
         
     
-    # Get critic values for all observations
-    critic_values = [[] for _ in range(mini_batch_size)]
-    with torch.no_grad():
-        for idx in range(mini_batch_size):
-            obs_tensor = torch.tensor([batch_observations[idx]], dtype=torch.float32).to(device)
-            values = np.array(critic.sample_critic(obs_tensor).tolist())
-            critic_values[idx] = values
-    
-    # Calculate advantages and returns
+    # --- 4. Advantages and returns (scalar critic, per-trajectory GAE) ---
     gamma = params['gamma']
     lam = params['lambda']
+
+    critic_values = [np.array([critic.value(s) for s in batch_states[idx]], dtype=float)
+                     for idx in range(mini_batch_size)]
     all_advantages, all_returns = calculate_gae(
         batch_rewards, critic_values, gamma, lam
     )
-    
-    # --- 5. Prepare Tensors ---
-    observation_tensors = []
-    action_tensors = []
-    logprob_tensors = []
-    advantage_tensors = []
-    return_tensors = []
-    
-    for batch_idx in range(mini_batch_size):
-        observation_tensors.append(torch.tensor(batch_observations[batch_idx], dtype=torch.float32).to(device))
-        action_tensors.append(torch.tensor(batch_actions[batch_idx], dtype=torch.float32).to(device))
-        logprob_tensors.append(torch.tensor(batch_logprobs[batch_idx], dtype=torch.float32).to(device))
-        advantage_tensors.append(torch.tensor(all_advantages[batch_idx], dtype=torch.float32).to(device))
-        return_tensors.append(torch.tensor(all_returns[batch_idx].copy(), dtype=torch.float32).to(device))
 
+    # --- 5. Flatten trajectories (ppo_update takes flat lists) ---
+    traj_states, traj_infos, traj_logprobs = [], [], []
+    for idx in range(mini_batch_size):
+        traj_states.extend(batch_states[idx])
+        traj_infos.extend(batch_infos[idx])
+        traj_logprobs.extend(batch_logprobs[idx])
+
+    advantages = np.concatenate(all_advantages)
+    returns = np.concatenate(all_returns)
+    if advantages.std() > 1e-8:
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
     # --- 6. Updates ---
-    targetkl = params['target_kl']
-    kl = 0
-    actor_loss = 0
-    
+    actor_loss, kl = 0.0, 0.0
     for _ in range(params['update_iterations']):
         actor_loss, kl = actor.ppo_update(
-            observation_tensors, 
-            action_tensors, 
-            logprob_tensors,
-            advantage_tensors
+            traj_states, traj_infos, traj_logprobs, advantages
         )
-        if kl > targetkl:
+        if kl > params['target_kl']:
             break
 
-    critic_loss = 0
-    for _ in range(params['update_iterations']):
-        critic_loss = critic.ppo_update(
-            observation_tensors, 
-            return_tensors, 
-        )
+    critic_loss = critic.ppo_update(traj_states, returns)
     
     avg_reward = np.mean([sum(r) for r in batch_rewards])
     
@@ -364,8 +332,9 @@ def generate_initial_designs(all_des, all_obj, all_constraints, eval_function, n
     """Generate random initial designs"""
     valid_designs = []
     obj_values = []
+    gene_space = eval_function.design_space
     while len(valid_designs) < num_designs:
-        design = np.random.randint(0, action_range, num_actions).tolist()
+        design = [int(np.random.choice(v['range'])) for v in gene_space]
         objs, is_constrained, constraint_vals = eval_function.evaluate(design)
         NFE += 1
         if not is_constrained:
@@ -385,6 +354,7 @@ def sample_next_batch(all_des, all_obj, all_constraints, eval_function,
     """
     designs = []
     obj_values = []
+    gene_space = eval_function.design_space
     
     # 10% random, 90% from previous results
     num_random = num_designs // 10
@@ -392,7 +362,7 @@ def sample_next_batch(all_des, all_obj, all_constraints, eval_function,
     
     # Random designs
     while len(designs) < num_random:
-        design = np.random.randint(0, action_range, num_actions).tolist()
+        design = [int(np.random.choice(v['range'])) for v in gene_space]
         objs, is_constrained, constraint_vals = eval_function.evaluate(design)
         NFE += 1
         if not is_constrained:
@@ -416,7 +386,7 @@ def sample_next_batch(all_des, all_obj, all_constraints, eval_function,
     
     # Fill remaining with random if needed
     while len(designs) < num_designs:
-        design = np.random.randint(0, action_range, num_actions).tolist()
+        design = [int(np.random.choice(v['range'])) for v in gene_space]
         objs, is_constrained, constraint_vals = eval_function.evaluate(design)
         NFE += 1
         if not is_constrained:
@@ -426,33 +396,6 @@ def sample_next_batch(all_des, all_obj, all_constraints, eval_function,
         all_obj.append(objs)
         all_constraints.append(is_constrained)
     return designs, obj_values, all_des, all_obj, all_constraints, NFE
-
-
-def calculate_pareto_progress(all_des, all_obj, all_constraints, hv_obj, hv_ind, NFE):
-    """Calculate Pareto front and hypervolume over time (from your original code)"""
-    pareto_front_des = []
-    pareto_front_obj = []
-    hypervolumes = []
-    
-    for obj in range(NFE):
-        if all_constraints[obj] == False or len(hypervolumes) == 0: # check this to save computational time
-            pfront_obj = hv_obj[:obj+1]
-            pfront_des = all_des[:obj+1]
-            pfront_mask = is_pareto_efficient(pfront_obj, return_mask=True)
-            if pfront_mask[-1]:
-                pareto_front_obj.append(pfront_obj[pfront_mask])
-                pareto_front_des.append(pfront_des[pfront_mask])
-                hypervolumes.append(hv_ind(pfront_obj[pfront_mask]))
-            else:
-                hypervolumes.append(hypervolumes[-1])
-                pareto_front_obj.append(pareto_front_obj[-1])
-                pareto_front_des.append(pareto_front_des[-1])
-        else:
-            hypervolumes.append(hypervolumes[-1])
-            pareto_front_obj.append(pareto_front_obj[-1])
-            pareto_front_des.append(pareto_front_des[-1])
-    
-    return pareto_front_des, pareto_front_obj, hypervolumes
 
 
 def plot_training_results(actor_loss, critic_loss, kl, avg_reward, params, suffix=""):
