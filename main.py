@@ -44,12 +44,20 @@ def build_arg_parser():
     # PPO / optimization hyperparameters (defaults = original params)
     p.add_argument('--num-epochs',        type=int,   default=20)
     p.add_argument('--mini-batch-size',   type=int,   default=4)
-    p.add_argument('--gamma',             type=float, default=0.999)
-    p.add_argument('--lambda-gae',        type=float, default=0.9, dest='lambda_gae')
-    p.add_argument('--learning-rate',     type=float, default=0.0003)
-    p.add_argument('--clip-ratio',        type=float, default=0.05)
-    p.add_argument('--update-iterations', type=int,   default=5)
-    p.add_argument('--target-kl',         type=float, default=0.003)
+    p.add_argument('--synthesis-gamma',             type=float, default=0.999)
+    p.add_argument('--synthesis-lambda-gae',        type=float, default=0.9,
+                   dest='synthesis_lambda_gae')
+    p.add_argument('--synthesis-learning-rate',     type=float, default=0.0003)
+    p.add_argument('--synthesis-clip-ratio',        type=float, default=0.05)
+    p.add_argument('--synthesis-update-iterations', type=int,   default=5)
+    p.add_argument('--synthesis-target-kl',         type=float, default=0.003)
+    p.add_argument('--repair-gamma',             type=float, default=0.999)
+    p.add_argument('--repair-lambda-gae',        type=float, default=0.9,
+                   dest='repair_lambda_gae')
+    p.add_argument('--repair-learning-rate',     type=float, default=0.0003)
+    p.add_argument('--repair-clip-ratio',        type=float, default=0.05)
+    p.add_argument('--repair-update-iterations', type=int,   default=5)
+    p.add_argument('--repair-target-kl',         type=float, default=0.003)
     p.add_argument('--chunk-size',        type=int,   default=256)
 
     # Transfer-learning params (kept as fixed defaults; swept separately)
@@ -88,12 +96,25 @@ def params_from_args(args):
     return {
         'num_epochs':        args.num_epochs,
         'mini_batch_size':   args.mini_batch_size,
-        'gamma':             args.gamma,
-        'lambda':            args.lambda_gae,
-        'learning_rate':     args.learning_rate,
-        'clip_ratio':        args.clip_ratio,
-        'update_iterations': args.update_iterations,
-        'target_kl':         args.target_kl,
+        # Active values default to synthesis and are replaced per method.
+        'gamma':             args.synthesis_gamma,
+        'lambda':            args.synthesis_lambda_gae,
+        'learning_rate':     args.synthesis_learning_rate,
+        'clip_ratio':        args.synthesis_clip_ratio,
+        'update_iterations': args.synthesis_update_iterations,
+        'target_kl':         args.synthesis_target_kl,
+        'synthesis_gamma':             args.synthesis_gamma,
+        'synthesis_lambda':            args.synthesis_lambda_gae,
+        'synthesis_learning_rate':     args.synthesis_learning_rate,
+        'synthesis_clip_ratio':        args.synthesis_clip_ratio,
+        'synthesis_update_iterations': args.synthesis_update_iterations,
+        'synthesis_target_kl':         args.synthesis_target_kl,
+        'repair_gamma':             args.repair_gamma,
+        'repair_lambda':            args.repair_lambda_gae,
+        'repair_learning_rate':     args.repair_learning_rate,
+        'repair_clip_ratio':        args.repair_clip_ratio,
+        'repair_update_iterations': args.repair_update_iterations,
+        'repair_target_kl':         args.repair_target_kl,
         'chunk_size':        args.chunk_size,
         'date_str':          args.date_str,
         'model_folder':      args.model_folder,
@@ -398,6 +419,12 @@ def main():
         for run_idx in range(num_runs):
             print(f"\n--- {method.name} | Run {run_idx + 1}/{num_runs} ---")
 
+            method_params = params.copy()
+            prefix = 'repair' if 'Repair' in method.name else 'synthesis'
+            for key in ('gamma', 'lambda', 'learning_rate', 'clip_ratio',
+                'update_iterations', 'target_kl'):
+                method_params[key] = params[f'{prefix}_{key}']
+
             # ── Resume guard: skip runs already fully saved to disk ──────────
             done, run_file, hv_file = _completed_run_exists(method.name, run_idx, params)
             if done:
@@ -418,7 +445,7 @@ def main():
             force_clear_memory()
 
             if method.name == "Random Search":
-                result = method.function(params)
+                result = method.function(method_params)
                 (all_des, all_obj, pareto_front_des,
                  pareto_front_obj, hypervolumes, NFE, run_max_values) = result
                 all_run_max_values.append(run_max_values)
@@ -432,10 +459,10 @@ def main():
 
             elif method.requires_max_values and max_values is not None:
                 if method.name in best_hv_models:
-                    result = method.function(max_values, params,
+                    result = method.function(max_values, method_params,
                                              run_idx=run_idx, best_hv_so_far=best_hv_models[method.name])
                 else:
-                    result = method.function(max_values, params)
+                    result = method.function(max_values, method_params)
 
                 if result is None:
                     print(f"Warning: {method.name} run {run_idx} returned None")
