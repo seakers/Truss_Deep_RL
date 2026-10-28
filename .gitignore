@@ -4,6 +4,10 @@ cuda-repo-wsl-ubuntu-12-8-local_12.8.1-1_amd64.deb
 
 results/*
 !results/.gitkeep
+logs/*
+!logs/.gitkeep
+tune_results/*
+!tune_results/.gitkeep
 
 chiplet_model/__pycache__/
 chiplet_model/dse/__pycache__/

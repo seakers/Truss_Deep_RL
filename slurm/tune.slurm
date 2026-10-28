@@ -8,7 +8,7 @@
 #SBATCH --partition=gpu
 #SBATCH --output=logs/tune_%A_%a.out
 #SBATCH --error=logs/tune_%A_%a.err
-#SBATCH --array=0-17             # = (#LR * #CLIP * #KL * #MB) combos - 1; adjust below
+#SBATCH --array=0-59             # = (#LR * #CLIP * #KL * #MB) combos - 1; adjust below
 ##############################################################################
 # Hyperparameter sweep over the NON-transfer PPO methods, iso-NFE budget.
 # One array task = one hyperparameter combo, evaluated on all swept methods.
@@ -82,7 +82,7 @@ for METHOD in "${METHODS[@]}"; do
     --target-kl "$KL" \
     --max-values-path "$MAXVALS" \
     --date-str "$RUN_DATE" \
-    --no-overlap-constraint
+    --no-overlap-constraint \
     > "$LOG" 2>&1
   RC=$?
   set -e
