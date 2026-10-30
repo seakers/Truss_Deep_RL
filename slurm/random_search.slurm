@@ -44,7 +44,7 @@ python main.py \
   --num-epochs 2000 \
   --mini-batch-size 32 \
   --date-str "$RS_DATE" \
-  --no-overlap-constraint
+  # --no-overlap-constraint
 
 MAXVALS="results/${RS_DATE}/max_values.npy"
 if [[ -f "$MAXVALS" ]]; then
