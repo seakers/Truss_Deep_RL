@@ -77,13 +77,16 @@ for METHOD in "${METHODS[@]}"; do
     --num-runs 1 \
     --num-epochs "$EPOCHS" \
     --mini-batch-size "$MB" \
-    --learning-rate "$LR" \
-    --clip-ratio "$CLIP" \
-    --target-kl "$KL" \
+    --synthesis-learning-rate "$LR" \
+    --synthesis-clip-ratio "$CLIP" \
+    --synthesis-target-kl "$KL" \
+    --repair-learning-rate "$LR" \
+    --repair-clip-ratio "$CLIP" \
+    --repair-target-kl "$KL" \
     --max-values-path "$MAXVALS" \
     --date-str "$RUN_DATE" \
-    # --no-overlap-constraint \
     > "$LOG" 2>&1
+    # --no-overlap-constraint \
   RC=$?
   set -e
   WALL=$(( $(date +%s) - T0 ))
