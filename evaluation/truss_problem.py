@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.sparse import coo_matrix
-from scipy.sparse.linalg import spsolve
+from scipy.linalg import solve as linsolve
 from scipy.linalg import eigh
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
@@ -169,10 +169,8 @@ class TrussProblem:
             T = np.array([[cx, cy, cz, 0, 0, 0], [0, 0, 0, cx, cy, cz]])
             k_local = np.array([[1, -1], [-1, 1]]) * k_val
             k_elem = T.T @ k_local @ T
-            indices = [n1*3, n1*3+1, n1*3+2, n2*3, n2*3+1, n2*3+2]
-            for r in range(6):
-                for c in range(6):
-                    K_global[indices[r], indices[c]] += k_elem[r, c]
+            idx = [n1*3, n1*3+1, n1*3+2, n2*3, n2*3+1, n2*3+2]
+            K_global[np.ix_(idx, idx)] += k_elem
 
             m_elem = self.rho * A * L
             for i in range(3):
@@ -188,7 +186,7 @@ class TrussProblem:
         M_reduced = M_global[np.ix_(free_dofs, free_dofs)]
         
         try:
-            u_reduced = spsolve(coo_matrix(K_reduced), F_reduced)
+            u_reduced = linsolve(K_reduced, F_reduced, assume_a='pos')
         except:
             return {'valid': False, 'reason': 'Singular'}
 
@@ -212,7 +210,8 @@ class TrussProblem:
         disp_viol = max(0, max_disp - self.disp_limit)
 
         try:
-            vals, _ = eigh(K_reduced, M_reduced, subset_by_index=[0, 0])
+            vals = eigh(K_reduced, M_reduced, subset_by_index=[0, 0],
+                        eigvals_only=True)
             frequency = np.sqrt(vals[0]) / (2 * np.pi) if vals[0] > 0 else 0.0
         except:
             frequency = 0.0
